@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
 
+lm_text=
 
 # To be run from one directory above this script.
 . ./path.sh
+. ./utils/parse_options.sh || exit 1;
 
 text=data/$1/train/text
 mainlm=$2
 lexicon=data/local/dict/lexicon.txt
+
+if [ $# -ne 2 ]; then
+  echo "Usage: $0 [options] <lm-name> <mainlm>"
+  echo " Options:"
+  echo "  --lm-text : specify the LM text path"
+  exit 1;
+fi
+
+if [[ ! -z "$lm_text" ]]; then
+  # overwrite the LM text
+  text=$lm_text
+fi
 
 for f in "$text" "$mainlm"; do
   [ ! -f $x ] && echo "$0: No such file $f" && exit 1;

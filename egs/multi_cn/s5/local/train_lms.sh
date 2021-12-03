@@ -1,11 +1,31 @@
 #!/usr/bin/env bash
 
+lm_text=
 
 # To be run from one directory above this script.
 . ./path.sh
+. ./utils/parse_options.sh || exit 1;
 
 text=data/train_combined/text
 lexicon=data/local/dict/lexicon.txt
+
+if [ $# -gt 1 ]; then
+  echo "Usage: $0 [<lm-name>]"
+  echo " Options:"
+  echo "  --lm-text : specify the LM text path"
+  exit 1;
+fi
+
+has_lm_name=false
+if [ $# == 1 ]; then
+  lm_name=$1
+  has_lm_name=true
+fi
+
+if [[ ! -z "$lm_text" ]]; then
+  # overwrite the LM text
+  text=$lm_text
+fi
 
 for f in "$text" "$lexicon"; do
   [ ! -f $x ] && echo "$0: No such file $f" && exit 1;
@@ -17,6 +37,10 @@ done
 # data/train_combined/text
 # data/local/dict/lexicon.txt
 dir=data/local/lm
+if $has_lm_name; then
+  # store result in subdirectory
+  dir=$dir/$lm_name
+fi
 mkdir -p $dir
 
 kaldi_lm=`which train_lm.sh`
