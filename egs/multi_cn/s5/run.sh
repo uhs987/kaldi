@@ -7,7 +7,7 @@
 . ./path.sh
 
 stage=0
-dbase=/mnt/data/openslr            # it is recommanded practice to provide absolute path here,
+dbase=/work/u7438383/data/openslr  # it is recommanded practice to provide absolute path here,
                                    # otherwise some data downloading scripts might break.
 
 aidatatang_url=www.openslr.org/resources/62
