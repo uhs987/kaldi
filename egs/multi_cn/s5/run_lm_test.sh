@@ -6,6 +6,7 @@ stage=0
 do_test_sets_mfcc=false
 do_multi_cn_lm_test=false
 do_ngram_lm_test=false
+do_rnn_lm_test=false
 
 # To be run from one directory above this script.
 . ./cmd.sh
@@ -18,6 +19,7 @@ if [ $# != 2 ]; then
   echo "  --do-test-sets-mfcc : If true, do mfcc for test corpora"
   echo "  --do_multi-cn-lm-test : If true, decode test_my_1 with multi_cn's LM only"
   echo "  --do-ngram-lm-test : If true, do ngram LM test"
+  echo "  --do-rnn-lm-test : If true, do rnn LM test"
 
   echo "  e.g.: $0 test_my_2 data/military_fans/test/text"
   echo "      : $0 test_my_3 /work/u7438383/data/lm-corpus/lm-corpus-2021-1118.txt"
@@ -80,17 +82,35 @@ if $do_multi_cn_lm_test; then
     echo "$0: run multi-cn lm test, lm-type origin"
     local/lm_test.sh --lm-type origin --test-sets "$test_sets" test_my_1 data/train_combined/text
   fi
+
+  if [ $stage -le 4 ]; then
+    echo "$0: run RNN lm test, lm-type origin"
+    local/rnnlm/run_tdnn_lstm.sh --lm-type origin --test-sets "$test_sets" test_my_1
+  fi
 fi
 
 if $do_ngram_lm_test; then
-  if [ $stage -le 4 ]; then
+  if [ $stage -le 5 ]; then
     echo "$0: run n-gram lm test, lm-type nointerp"
     local/lm_test.sh --lm-type nointerp --test-sets "$test_sets" $lm_name $lm_text
   fi
 
-  if [ $stage -le 5 ]; then
+  if [ $stage -le 6 ]; then
     echo "$0: run n-gram lm test, lm-type interp"
     local/lm_test.sh --lm-type interp --test-sets "$test_sets" $lm_name $lm_text
+  fi
+fi
+
+if $do_rnn_lm_test; then
+  # use py36
+  if [ $stage -le 7 ]; then
+    echo "$0: run RNN lm test, lm-type nointerp"
+    local/rnnlm/run_tdnn_lstm.sh --lm-type nointerp --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 8 ]; then
+    echo "$0: run RNN lm test, lm-type interp"
+    local/rnnlm/run_tdnn_lstm.sh --lm-type interp --test-sets "$test_sets" $lm_name
   fi
 fi
 
