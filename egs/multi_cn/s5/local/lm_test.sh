@@ -31,8 +31,16 @@ case $lm_type in
     lm_suffix=""
     LM=${lm_name}_tg
     ;;
+  nointerp-lexicon)
+    lm_suffix="_lexicon"
+    LM=${lm_name}${lm_suffix}_tg
+    ;;
   interp)
     lm_suffix="_interp"
+    LM=${lm_name}${lm_suffix}_tg
+    ;;
+  interp-lexicon)
+    lm_suffix="_interp_lexicon"
     LM=${lm_name}${lm_suffix}_tg
     ;;
   *)
@@ -66,6 +74,22 @@ if [ $stage -le 0 ]; then
     # G compilation, check LG composition
     utils/format_lm.sh data/lang data/local/lm/$lm_name/3gram-mincount/lm_unpruned.gz \
       data/local/dict/lexicon.txt data/lang_$LM || exit 1;
+  elif [[ $lm_type == "nointerp-lexicon" ]]; then
+    cp $lm_text data/local/lm/text.$lm_name
+
+    # dict: train_combined+test_combined+LM text, data/local/dict/$lm_name
+    local/prepare_dict.sh --lm-text data/local/lm/text.$lm_name $lm_name
+    local/fix_lm_dict.py $lm_name
+
+    # LM: LM text, data/local/lm/${lm_name}${lm_suffix}
+    local/train_lms.sh --lm-text data/local/lm/text.$lm_name --lexicon-text data/local/dict/$lm_name/lexicon.txt \
+      ${lm_name}${lm_suffix} || exit 1;
+
+    utils/prepare_lang.sh data/local/dict/${lm_name} "<UNK>" data/local/lang/${lm_name}${lm_suffix} data/lang/${lm_name}${lm_suffix}
+
+    # G compilation, check LG composition
+    utils/format_lm.sh data/lang/${lm_name}${lm_suffix} data/local/lm/${lm_name}${lm_suffix}/3gram-mincount/lm_unpruned.gz \
+      data/local/dict/${lm_name}/lexicon.txt data/lang_$LM || exit 1;
   elif [[ $lm_type == "interp" ]]; then
     cp $lm_text data/local/lm/text.$1
 
@@ -78,6 +102,22 @@ if [ $stage -le 0 ]; then
     # G compilation, check LG composition
     utils/format_lm.sh data/lang data/local/lm/${lm_name}${lm_suffix}/lm_interp.gz \
       data/local/dict/lexicon.txt data/lang_$LM || exit 1;
+  elif [[ $lm_type == "interp-lexicon" ]]; then
+    cp $lm_text data/local/lm/text.$lm_name
+
+    # dict: train_combined+test_combined+LM text, data/local/dict/$lm_name
+    local/prepare_dict.sh --lm-text data/local/lm/text.$lm_name $lm_name
+    local/fix_lm_dict.py $lm_name
+
+    # LM: LM text, data/local/lm/${lm_name}${lm_suffix}
+    local/train_corpus_lm.sh --lm-text data/local/lm/text.$lm_name --lexicon-text data/local/dict/$lm_name/lexicon.txt \
+      ${lm_name}${lm_suffix} data/local/lm/3gram-mincount/lm_unpruned.gz || exit 1;
+
+    utils/prepare_lang.sh data/local/dict/${lm_name} "<UNK>" data/local/lang/${lm_name}${lm_suffix} data/lang/${lm_name}${lm_suffix}
+
+    # G compilation, check LG composition
+    utils/format_lm.sh data/lang/${lm_name}${lm_suffix} data/local/lm/${lm_name}${lm_suffix}/lm_interp.gz \
+      data/local/dict/${lm_name}/lexicon.txt data/lang_$LM || exit 1;
   fi
 fi
 

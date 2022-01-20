@@ -41,6 +41,7 @@ fi
 lm_name=$1
 
 lm_text_only=false
+lm_lexicon=false
 
 case $lm_type in
   origin)
@@ -53,8 +54,19 @@ case $lm_type in
     lm_suffix=""
     LM=${lm_name}_tg
     ;;
+  nointerp-lexicon)
+    lm_text_only=true
+    lm_lexicon=true
+    lm_suffix="_lexicon"
+    LM=${lm_name}${lm_suffix}_tg
+    ;;
   interp)
     lm_suffix="_interp"
+    LM=${lm_name}${lm_suffix}_tg
+    ;;
+  interp-lexicon)
+    lm_lexicon=true
+    lm_suffix="_interp_lexicon"
     LM=${lm_name}${lm_suffix}_tg
     ;;
   *)
@@ -65,7 +77,11 @@ esac
 
 text=data/train_combined/text
 lm_text=data/local/lm/text.$lm_name
-words=data/lang/words.txt
+if $lm_lexicon; then
+  words=data/lang/${lm_name}${lm_suffix}/words.txt
+else
+  words=data/lang/words.txt
+fi
 text_dir=data/rnnlm/text_1e/${lm_name}${lm_suffix}
 dir=$dir/${lm_name}${lm_suffix}
 mkdir -p $dir/config

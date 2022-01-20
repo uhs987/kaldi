@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 lm_text=
+lexicon_text=
 
 # To be run from one directory above this script.
 . ./path.sh
@@ -14,12 +15,18 @@ if [ $# -ne 2 ]; then
   echo "Usage: $0 [options] <lm-name> <mainlm>"
   echo " Options:"
   echo "  --lm-text : specify the LM text path"
+  echo "  --lexicon-text: specify the lexicon text path"
   exit 1;
 fi
 
 if [[ ! -z "$lm_text" ]]; then
   # overwrite the LM text
   text=$lm_text
+fi
+
+if [[ ! -z "$lexicon_text" ]]; then
+  # overwrite the lexicon text
+  lexicon=$lexicon_text
 fi
 
 for f in "$text" "$mainlm"; do

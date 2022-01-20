@@ -96,21 +96,41 @@ if $do_ngram_lm_test; then
   fi
 
   if [ $stage -le 6 ]; then
+    echo "$0: run n-gram lm test, lm-type nointerp-lexicon"
+    local/lm_test.sh --lm-type nointerp-lexicon --test-sets "$test_sets" $lm_name $lm_text
+  fi
+
+  if [ $stage -le 7 ]; then
     echo "$0: run n-gram lm test, lm-type interp"
     local/lm_test.sh --lm-type interp --test-sets "$test_sets" $lm_name $lm_text
+  fi
+
+  if [ $stage -le 8 ]; then
+    echo "$0: run n-gram lm test, lm-type interp-lexicon"
+    local/lm_test.sh --lm-type interp-lexicon --test-sets "$test_sets" $lm_name $lm_text
   fi
 fi
 
 if $do_rnn_lm_test; then
   # use py36
-  if [ $stage -le 7 ]; then
+  if [ $stage -le 9 ]; then
     echo "$0: run RNN lm test, lm-type nointerp"
     local/rnnlm/run_tdnn_lstm.sh --lm-type nointerp --test-sets "$test_sets" $lm_name
   fi
 
-  if [ $stage -le 8 ]; then
+  if [ $stage -le 10 ]; then
+    echo "$0: run RNN lm test, lm-type nointerp-lexicon"
+    local/rnnlm/run_tdnn_lstm.sh --lm-type nointerp-lexicon --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 11 ]; then
     echo "$0: run RNN lm test, lm-type interp"
     local/rnnlm/run_tdnn_lstm.sh --lm-type interp --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 12 ]; then
+    echo "$0: run RNN lm test, lm-type interp-lexicon"
+    local/rnnlm/run_tdnn_lstm.sh --lm-type interp-lexicon --test-sets "$test_sets" $lm_name
   fi
 fi
 

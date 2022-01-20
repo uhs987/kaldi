@@ -12,20 +12,34 @@
 # for OOV, we just produce pronunciation using Charactrt Mapping.
 
 full_dict=false
+lm_text=
 
 . ./path.sh
 . ./utils/parse_options.sh || exit 1;
 
-[ $# != 0 ] && echo "Usage: $0" && exit 1;
+if [ $# -gt 1 ]; then
+  echo "Usage: $0 [<lm-name>]"
+  echo " Options:"
+  echo "  --full-dict: add entire dictionary to lexicon"
+  echo "  --lm-text: specify the LM text path"
+
+  exit 1;
+fi
 
 train_dir=data/train_combined
 dev_dir=data/test_combined
 dict_dir=data/local/dict
+
+if [ $# == 1 ]; then
+  # store result in subdirectory
+  dict_dir=$dict_dir/$1
+fi
+
 mkdir -p $dict_dir
 mkdir -p $dict_dir/lexicon-{en,ch}
 
 # extract full vocabulary
-cat $train_dir/text $dev_dir/text | awk '{for (i = 2; i <= NF; i++) print $i}' |\
+cat $train_dir/text $dev_dir/text $lm_text | awk '{for (i = 2; i <= NF; i++) print $i}' |\
   perl -ape 's/ /\n/g;' | sort -u | grep -v '\[FIL\]' |\
   grep -v '\[SPK\]' > $dict_dir/words.txt || exit 1;
 
