@@ -62,7 +62,7 @@ if [ $stage -le 4 ]; then
   utils/mkgraph.sh data/lang_combined_tg ${cleaned_dir} ${cleaned_dir}/graph_tg
 
   for c in $test_sets; do
-    (
+    #(
       steps/decode_fmllr.sh --nj $decode_nj --num-threads $decode_num_threads \
         --cmd "$decode_cmd" \
         ${cleaned_dir}/graph_tg data/${c}/test ${cleaned_dir}/decode_${c}_tg
@@ -73,9 +73,9 @@ if [ $stage -le 4 ]; then
           --cmd "$decode_cmd" \
           ${cleaned_dir}/graph_$c data/$c/test ${cleaned_dir}/decode_${c}_test_clm || exit 1;
       fi
-   ) &
+   #) &
   done
 fi
 
-wait;
+#wait;
 exit 0;

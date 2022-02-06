@@ -106,14 +106,14 @@ if [ $stage -le 5 ]; then
   mfccdir=mfcc
   corpora="aidatatang aishell magicdata primewords stcmds thchs"
   for c in $corpora; do
-    (
+    #(
       steps/make_mfcc_pitch_online.sh --cmd "$train_cmd" --nj 20 \
         data/$c/train exp/make_mfcc/$c/train $mfccdir/$c || exit 1;
       steps/compute_cmvn_stats.sh data/$c/train \
         exp/make_mfcc/$c/train $mfccdir/$c || exit 1;
-    ) &
+    #) &
   done
-  wait
+  #wait
   if $has_aishell2; then
     steps/make_mfcc_pitch_online.sh --cmd "$train_cmd" --nj 20 \
       data/aishell2/train exp/make_mfcc/aishell2/train $mfccdir/aishell2 || exit 1;
@@ -126,14 +126,14 @@ if [ $stage -le 6 ]; then
   # make test features
   mfccdir=mfcc
   for c in $test_sets; do
-    (
+    #(
       steps/make_mfcc_pitch_online.sh --cmd "$train_cmd" --nj 10 \
         data/$c/test exp/make_mfcc/$c/test $mfccdir/$c || exit 1;
       steps/compute_cmvn_stats.sh data/$c/test \
         exp/make_mfcc/$c/test $mfccdir/$c || exit 1;
-    ) &
+    #) &
   done
-  wait
+  #wait
 fi
 
 if [ $stage -le 7 ]; then
@@ -163,7 +163,7 @@ if [ $stage -le 9 ]; then
   # test tri1b
   utils/mkgraph.sh data/lang_combined_tg exp/tri1b exp/tri1b/graph_tg || exit 1;
   for c in $test_sets; do
-    (
+    #(
       steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
         exp/tri1b/graph_tg data/$c/test exp/tri1b/decode_${c}_test_tg || exit 1;
       if $corpus_lm; then
@@ -172,9 +172,9 @@ if [ $stage -le 9 ]; then
         steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
           exp/tri1b/graph_$c data/$c/test exp/tri1b/decode_${c}_test_clm || exit 1;
       fi
-    ) &
+    #) &
   done
-  wait
+  #wait
 fi
 
 if [ $stage -le 10 ]; then
@@ -189,7 +189,7 @@ if [ $stage -le 11 ]; then
   # test tri2a
   utils/mkgraph.sh data/lang_combined_tg exp/tri2a exp/tri2a/graph_tg || exit 1;
   for c in $test_sets; do
-    (
+    #(
       steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
         exp/tri2a/graph_tg data/$c/test exp/tri2a/decode_${c}_test_tg || exit 1;
       if $corpus_lm; then
@@ -198,9 +198,9 @@ if [ $stage -le 11 ]; then
         steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
           exp/tri2a/graph_$c data/$c/test exp/tri2a/decode_${c}_test_clm || exit 1;
       fi
-    ) &
+    #) &
   done
-  wait
+  #wait
 fi
 
 if [ $stage -le 12 ]; then
@@ -218,7 +218,7 @@ if [ $stage -le 13 ]; then
   # test tri3a
   utils/mkgraph.sh data/lang_combined_tg exp/tri3a exp/tri3a/graph_tg || exit 1;
   for c in $test_sets; do
-    (
+    #(
       steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
         exp/tri3a/graph_tg data/$c/test exp/tri3a/decode_${c}_test_tg || exit 1;
       if $corpus_lm; then
@@ -227,9 +227,9 @@ if [ $stage -le 13 ]; then
         steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
           exp/tri3a/graph_$c data/$c/test exp/tri3a/decode_${c}_test_clm || exit 1;
       fi
-    ) &
+    #) &
   done
-  wait
+  #wait
 fi
 
 if [ $stage -le 14 ]; then
@@ -253,7 +253,7 @@ if [ $stage -le 15 ]; then
   # test tri4a
   utils/mkgraph.sh data/lang_combined_tg exp/tri4a exp/tri4a/graph_tg || exit 1;
   for c in $test_sets; do
-    (
+    #(
       steps/decode_fmllr.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
         exp/tri4a/graph_tg data/$c/test exp/tri4a/decode_${c}_test_tg || exit 1;
       if $corpus_lm; then
@@ -262,9 +262,9 @@ if [ $stage -le 15 ]; then
         steps/decode_fmllr.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
           exp/tri4a/graph_$c data/$c/test exp/tri4a/decode_${c}_test_clm || exit 1;
       fi
-    ) &
+    #) &
   done
-  wait
+  #wait
 fi
 
 if [ $stage -le 16 ]; then

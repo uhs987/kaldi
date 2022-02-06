@@ -184,6 +184,7 @@ if [ $stage -le 15 ]; then
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0 --constrained false" \
     --egs.chunk-width $frames_per_eg \
+    --egs.nj 10 \
     --trainer.dropout-schedule $dropout_schedule \
     --trainer.add-option="--optimization.memory-compression-level=2" \
     --trainer.num-chunk-per-minibatch 128,64 \
@@ -217,14 +218,14 @@ fi
 if [ $stage -le 17 ]; then
   rm $dir/.error 2>/dev/null || true
   for decode_set in $test_sets; do
-    (
+    #(
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
         --nj $decode_nj --cmd "$decode_cmd" \
         --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
         $graph_dir data/${decode_set}/test_hires $dir/decode_${decode_set}_tg || exit 1
-    ) || touch $dir/.error &
+    #) || touch $dir/.error &
   done
-  wait
+  #wait
   [ -f $dir/.error ] && echo "$0: there was a problem while decoding" && exit 1
 fi
 
@@ -237,7 +238,7 @@ if $test_online_decoding && [ $stage -le 18 ]; then
 
   rm $dir/.error 2>/dev/null || true
   for data in $test_sets; do
-    (
+    #(
       nspk=$(wc -l <data/${data}/test/spk2utt)
       # note: we just give it "data/${data}" as it only uses the wav.scp, the
       # feature type does not matter.
@@ -245,9 +246,9 @@ if $test_online_decoding && [ $stage -le 18 ]; then
         --acwt 1.0 --post-decode-acwt 10.0 \
         --nj $nspk --cmd "$decode_cmd" \
         $graph_dir data/${data}/test ${dir}_online/decode_${data}_tg || exit 1
-    ) || touch $dir/.error &
+    #) || touch $dir/.error &
   done
-  wait
+  #wait
   [ -f $dir/.error ] && echo "$0: there was a problem while decoding" && exit 1
 fi
 
