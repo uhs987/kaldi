@@ -11,7 +11,10 @@
 # phone set at the end. For Chinese, we use an online dictionary,
 # for OOV, we just produce pronunciation using Charactrt Mapping.
 
+full_dict=false
+
 . ./path.sh
+. ./utils/parse_options.sh || exit 1;
 
 [ $# != 0 ] && echo "Usage: $0" && exit 1;
 
@@ -50,9 +53,14 @@ awk 'NR==FNR{words[$1]; next;} !($1 in words)' \
   $dict_dir/cmudict/cmudict-plain.txt $dict_dir/lexicon-en/words-en.txt |\
   grep -E -v '<.?s>' > $dict_dir/lexicon-en/words-en-oov-all.txt || exit 1;
 
-awk 'NR==FNR{words[$1]; next;} ($1 in words)' \
-  $dict_dir/lexicon-en/words-en.txt $dict_dir/cmudict/cmudict-plain.txt |\
-  egrep -v '<.?s>' > $dict_dir/lexicon-en/lexicon-en-iv.txt || exit 1;
+if $full_dict; then
+  cat $dict_dir/cmudict/cmudict-plain.txt |\
+    egrep -v '<.?s>' > $dict_dir/lexicon-en/lexicon-en-iv.txt || exit 1;
+else
+  awk 'NR==FNR{words[$1]; next;} ($1 in words)' \
+    $dict_dir/lexicon-en/words-en.txt $dict_dir/cmudict/cmudict-plain.txt |\
+    egrep -v '<.?s>' > $dict_dir/lexicon-en/lexicon-en-iv.txt || exit 1;
+fi
 
 rm $dict_dir/lexicon-en/words-en-oov.txt
 rm $dict_dir/lexicon-en/words-en-oov-other.txt
@@ -149,7 +157,8 @@ cat $dict_dir/lexicon-en/lexicon-en-phn.txt | \
 if [ ! -f $dict_dir/cedict/cedict_1_0_ts_utf-8_mdbg.txt ]; then
   echo "------------- Downloading cedit dictionary ---------------"
   mkdir -p $dict_dir/cedict
-  wget -P $dict_dir/cedict http://www.mdbg.net/chindict/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz
+  wget -P $dict_dir/cedict https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz
+
   gunzip $dict_dir/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz
 fi
 
@@ -173,9 +182,14 @@ awk 'NR==FNR{words[$1]; next;} !($1 in words)' \
   $dict_dir/cedict/ch-dict.txt $dict_dir/lexicon-ch/words-ch-all.txt |\
   egrep -v '<.?s>' > $dict_dir/lexicon-ch/words-ch-oov.txt || exit 1;
 
-awk 'NR==FNR{words[$1]; next;} ($1 in words)' \
-  $dict_dir/lexicon-ch/words-ch-all.txt $dict_dir/cedict/ch-dict.txt |\
-  egrep -v '<.?s>' > $dict_dir/lexicon-ch/lexicon-ch-iv.txt || exit 1;
+if $full_dict; then
+  cat $dict_dir/cedict/ch-dict.txt |\
+    egrep -v '<.?s>' > $dict_dir/lexicon-ch/lexicon-ch-iv.txt || exit 1;
+else
+  awk 'NR==FNR{words[$1]; next;} ($1 in words)' \
+    $dict_dir/lexicon-ch/words-ch-all.txt $dict_dir/cedict/ch-dict.txt |\
+    egrep -v '<.?s>' > $dict_dir/lexicon-ch/lexicon-ch-iv.txt || exit 1;
+fi
 
 wc -l $dict_dir/lexicon-ch/words-ch-oov.txt
 wc -l $dict_dir/lexicon-ch/lexicon-ch-iv.txt
@@ -285,6 +299,8 @@ cat $dict_dir/lexicon-ch/lexicon-ch-oov-mp.txt $dict_dir/lexicon-ch/lexicon-ch-i
 
 # convert Chinese pinyin to CMU format
 cat $dict_dir/lexicon-ch/lexicon-ch.txt | sed -e 's/U:/V/g' | sed -e 's/ R\([0-9]\)/ ER\1/g'|\
+  sed -e 's/，//g' | sed -e 's/, //g' |\
+  sed -e 's/·//g' | sed -e 's/· //g' |\
   utils/pinyin_map.pl conf/pinyin2cmu > $dict_dir/lexicon-ch/lexicon-ch-cmu.txt || exit 1;
 
 # combine English and Chinese lexicons

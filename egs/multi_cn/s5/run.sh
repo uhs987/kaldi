@@ -75,7 +75,7 @@ if [ $stage -le 2 ]; then
   fi
   utils/combine_data.sh data/test_combined \
     data/{aidatatang,aishell,magicdata,thchs}/{dev,test} || exit 1;
-  local/prepare_dict.sh || exit 1;
+  local/prepare_dict.sh --full-dict true || exit 1;
 fi
 
 if [ $stage -le 3 ]; then

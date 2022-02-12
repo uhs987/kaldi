@@ -210,7 +210,8 @@ if [ $stage -le 16 ]; then
   utils/mkgraph.sh --self-loop-scale 1.0 --remove-oov \
     data/lang_combined_tg $dir $graph_dir
   # remove <UNK> (word id is 3) from the graph, and convert back to const-FST.
-  fstrmsymbols --apply-to-output=true --remove-arcs=true "echo 3|" $graph_dir/HCLG.fst - | \
+  oom_int=$(cat data/lang_combined_tg/oov.int)
+  fstrmsymbols --apply-to-output=true --remove-arcs=true "echo ${oom_int}|" $graph_dir/HCLG.fst - | \
     fstconvert --fst_type=const > $graph_dir/temp.fst
   mv $graph_dir/temp.fst $graph_dir/HCLG.fst
 fi
