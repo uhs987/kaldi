@@ -7,6 +7,9 @@ do_test_sets_mfcc=false
 do_multi_cn_lm_test=false
 do_ngram_lm_test=false
 do_rnn_lm_test=false
+do_pytorch_transformer_lm_test=false
+do_pytorch_rnn_lstm_lm_test=false
+do_pytorch_rnn_gru_lm_test=false
 
 # To be run from one directory above this script.
 . ./cmd.sh
@@ -20,6 +23,9 @@ if [ $# != 2 ]; then
   echo "  --do_multi-cn-lm-test : If true, decode test_my_1 with multi_cn's LM only"
   echo "  --do-ngram-lm-test : If true, do ngram LM test"
   echo "  --do-rnn-lm-test : If true, do rnn LM test"
+  echo "  --do-pytorch-transformer-lm-test : If true, do rnn LM test"
+  echo "  --do-pytorch-rnn-lstm-lm-test : If true, do rnn LM test"
+  echo "  --do-pytorch-rnn-gru-lm-test : If true, do rnn LM test"
 
   echo "  e.g.: $0 test_my_2 data/military_fans/test/text"
   echo "      : $0 test_my_3 /work/u7438383/data/lm-corpus/lm-corpus-2021-1118.txt"
@@ -131,6 +137,72 @@ if $do_rnn_lm_test; then
   if [ $stage -le 12 ]; then
     echo "$0: run RNN lm test, lm-type interp-lexicon"
     local/rnnlm/run_tdnn_lstm.sh --lm-type interp-lexicon --test-sets "$test_sets" $lm_name
+  fi
+fi
+
+if $do_pytorch_transformer_lm_test; then
+  if [ $stage -le 13 ]; then
+    echo "$0: run pytorch transformer lm test, lm-type nointerp"
+    local/pytorchnn/run_nnlm.sh --lm-type nointerp --model-type Transformer --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 14 ]; then
+    echo "$0: run pytorch transformer lm test, lm-type nointerp-lexicon"
+    local/pytorchnn/run_nnlm.sh --lm-type nointerp-lexicon --model-type Transformer --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 15 ]; then
+    echo "$0: run pytorch transformer lm test, lm-type interp"
+    local/pytorchnn/run_nnlm.sh --lm-type interp --model-type Transformer --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 16 ]; then
+    echo "$0: run pytorch transformer lm test, lm-type interp-lexicon"
+    local/pytorchnn/run_nnlm.sh --lm-type interp-lexicon --model-type Transformer --test-sets "$test_sets" $lm_name
+  fi
+fi
+
+if $do_pytorch_rnn_lstm_lm_test; then
+  if [ $stage -le 17 ]; then
+    echo "$0: run pytorch RNN LSTM lm test, lm-type nointerp"
+    local/pytorchnn/run_nnlm.sh --lm-type nointerp --model-type LSTM --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 18 ]; then
+    echo "$0: run pytorch RNN LSTM lm test, lm-type nointerp-lexicon"
+    local/pytorchnn/run_nnlm.sh --lm-type nointerp-lexicon --model-type LSTM --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 19 ]; then
+    echo "$0: run pytorch RNN LSTM lm test, lm-type interp"
+    local/pytorchnn/run_nnlm.sh --lm-type interp --model-type LSTM --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 20 ]; then
+    echo "$0: run pytorch RNN LSTM lm test, lm-type interp-lexicon"
+    local/pytorchnn/run_nnlm.sh --lm-type interp-lexicon --model-type LSTM --test-sets "$test_sets" $lm_name
+  fi
+fi
+
+if $do_pytorch_rnn_gru_lm_test; then
+  if [ $stage -le 21 ]; then
+    echo "$0: run pytorch RNN GRU lm test, lm-type nointerp"
+    local/pytorchnn/run_nnlm.sh --lm-type nointerp --model-type GRU --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 22 ]; then
+    echo "$0: run pytorch RNN GRU lm test, lm-type nointerp-lexicon"
+    local/pytorchnn/run_nnlm.sh --lm-type nointerp-lexicon --model-type GRU --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 23 ]; then
+    echo "$0: run pytorch RNN GRU lm test, lm-type interp"
+    local/pytorchnn/run_nnlm.sh --lm-type interp --model-type GRU --test-sets "$test_sets" $lm_name
+  fi
+
+  if [ $stage -le 24 ]; then
+    echo "$0: run pytorch RNN GRU lm test, lm-type interp-lexicon"
+    local/pytorchnn/run_nnlm.sh --lm-type interp-lexicon --model-type GRU --test-sets "$test_sets" $lm_name
   fi
 fi
 
