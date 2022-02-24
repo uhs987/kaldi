@@ -84,6 +84,7 @@ cat $cleantext | awk -v wmap=$dir/word_map 'BEGIN{while((getline<wmap)>0)map[$1]
    || exit 1;
 
 train_lm.sh --arpa --lmtype 3gram-mincount $dir || exit 1;
+train_lm.sh --arpa --lmtype 4gram-mincount $dir || exit 1;
 
 # LM is small enough that we don't need to prune it (only about 0.7M N-grams).
 # Perplexity over 128254.000000 words is 90.446690

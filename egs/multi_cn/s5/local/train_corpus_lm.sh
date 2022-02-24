@@ -11,12 +11,18 @@ text=data/$1/train/text
 mainlm=$2
 lexicon=data/local/dict/lexicon.txt
 
-if [ $# -ne 2 ]; then
-  echo "Usage: $0 [options] <lm-name> <mainlm>"
+if [ $# -gt 3 ]; then
+  echo "Usage: $0 [options] <lm-name> <mainlm> [<mainlm-fg>]"
   echo " Options:"
   echo "  --lm-text : specify the LM text path"
   echo "  --lexicon-text: specify the lexicon text path"
   exit 1;
+fi
+
+has_mainlm_fg=false
+if [ $# == 3 ]; then
+  mainlm_fg=$3
+  has_mainlm_fg=true
 fi
 
 if [[ ! -z "$lm_text" ]]; then
@@ -97,10 +103,32 @@ EOF
   gunzip -c $dir/train.gz | head -n 1000 | \
     get_raw_ngrams 3 | sort | uniq -c | uniq_to_ngrams | \
     perl -ane 's/(\S+)$/:$1/; print;' | sort | gzip -c > $dir/3gram-mincount/heldout_ngrams.gz
+
+  if $has_mainlm_fg; then
+    mkdir -p $dir/4gram-mincount
+    cat >$dir/4gram-mincount/config.get_ngrams <<EOF
+D=0 tau=0 phi=1
+D=0 tau=0 phi=1
+D=1 tau=0 phi=1
+D=1 tau=0 phi=1
+EOF
+    gunzip -c $dir/train.gz | tail -n +1000 | \
+      get_raw_ngrams 4 | sort | uniq -c | uniq_to_ngrams | \
+      sort | merge_ngrams | discount_ngrams $dir/4gram-mincount/config.get_ngrams | \
+      sort | merge_ngrams | gzip -c > $dir/4gram-mincount/ngrams.gz
+    gunzip -c $dir/train.gz | head -n 1000 | \
+      get_raw_ngrams 4 | sort | uniq -c | uniq_to_ngrams | \
+      perl -ane 's/(\S+)$/:$1/; print;' | sort | gzip -c > $dir/4gram-mincount/heldout_ngrams.gz
+  fi
 fi
 
 train_lm.sh --arpa --lmtype 3gram-mincount $dir || exit 1;
 ngram -lm $dir/3gram-mincount/lm_unpruned.gz -mix-lm $mainlm -lambda 0.9 -write-lm $dir/lm_interp.gz
+
+if $has_mainlm_fg; then
+  train_lm.sh --arpa --lmtype 4gram-mincount $dir || exit 1;
+  ngram -lm $dir/4gram-mincount/lm_unpruned.gz -mix-lm $mainlm_fg -lambda 0.9 -write-lm $dir/lm_interp_fg.gz
+fi
 
 # LM is small enough that we don't need to prune it (only about 0.7M N-grams).
 # Perplexity over 128254.000000 words is 90.446690
