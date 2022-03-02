@@ -223,7 +223,8 @@ if [ $stage -le 3 ]; then
   echo "$0: Perform lattice rescoring on $ac_model_dir with a $model_type LM."
   #START=$SECONDS
   for decode_set in $test_sets; do
-      decode_dir=${ac_model_dir}/decode_${decode_set}_${LM}
+    for n in 1 2 3 4 5 6 7 8 9 10; do
+      decode_dir=${ac_model_dir}/decode_${decode_set}-${n}_${LM}
       steps/pytorchnn/lmrescore_lattice_pytorchnn.sh \
         --cmd "$cmd --mem 4G" \
         --model-type $model_type \
@@ -236,8 +237,9 @@ if [ $stage -le 3 ]; then
         --epsilon 0.5 \
         --oov_symbol "'<UNK>'" \
         data/lang_$LM $nn_model $data_dir/words.txt \
-        data/${decode_set}/test_hires ${decode_dir} \
+        data/${decode_set}/test_hires-$n ${decode_dir} \
         ${decode_dir}_${decode_dir_suffix}
+    done
   done
   #END=$SECONDS
   #DURATION=$((END-START))
@@ -250,9 +252,15 @@ if [ $stage -le 4 ]; then
   for c in $test_sets; do
     echo "$c:"
     echo "--- CER ---"
-    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}{_nbest,}; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
+    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}_nbest; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
+    for n in 1 2 3 4 5 6 7 8 9 10; do
+      for x in exp/*/*/decode_${c}-${n}_${LM}_${decode_dir_suffix}; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
+    done
     echo "--- WER ---"
-    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}{_nbest,}; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
+    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}_nbest; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
+    for n in 1 2 3 4 5 6 7 8 9 10; do
+      for x in exp/*/*/decode_${c}-${n}_${LM}_${decode_dir_suffix}; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
+    done
   done
 
   echo ""

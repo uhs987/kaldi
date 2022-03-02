@@ -227,6 +227,15 @@ if [ $stage -le 7 ]; then
       --nj $decode_nj --cmd "$decode_cmd" \
       --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${c}_hires \
       $graph_dir data/$c/test_hires $decode_dir || exit 1
+
+    # for pytorch lattice rescore
+    for n in 1 2 3 4 5 6 7 8 9 10; do
+      decode_dir=$dir/decode_${c}-${n}_${LM}
+      steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
+        --nj $decode_nj --cmd "$decode_cmd" \
+        --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${c}_hires \
+        $graph_dir data/$c/test_hires-$n ${decode_dir} || exit 1
+    done
   done
   [ -f $dir/.error ] && echo "$0: there was a problem while decoding" && exit 1
 fi
@@ -239,9 +248,15 @@ if [ $stage -le 8 ]; then
     echo "--- CER ---"
     for x in exp/*/decode_${c}_${lm_name}${lm_suffix}_tg; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
     for x in exp/*/*/decode_${c}_${lm_name}${lm_suffix}_tg; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
+    for n in 1 2 3 4 5 6 7 8 9 10; do
+      for x in exp/*/*/decode_${c}-${n}_${lm_name}${lm_suffix}_tg; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
+    done
     echo "--- WER ---"
     for x in exp/*/decode_${c}_${lm_name}${lm_suffix}_tg; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
     for x in exp/*/*/decode_${c}_${lm_name}${lm_suffix}_tg; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
+    for n in 1 2 3 4 5 6 7 8 9 10; do
+      for x in exp/*/*/decode_${c}-${n}_${lm_name}${lm_suffix}_tg; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
+    done
   done
 
   echo ""
