@@ -5,6 +5,7 @@ set -e
 stage=0
 lm_type=
 test_sets=""
+lambdas=""
 
 . ./cmd.sh || exit 1;
 . ./path.sh || exit 1;
@@ -15,6 +16,7 @@ if [ $# != 2 ]; then
   echo " Options:"
   echo "  --lm-type [origin|nointerp|interp] : type of language model to create"
   echo "  --test-sets : test sets to be decoded"
+  echo "  --lambdas : lambdas for n-gram LM interpolation"
 
   exit 1;
 fi
@@ -99,15 +101,27 @@ if [ $stage -le 0 ]; then
   elif [[ $lm_type == "interp" ]]; then
     cp $lm_text data/local/lm/text.$1
 
-    # LM: LM text, data/local/lm/${lm_name}${lm_suffix}
-    local/train_corpus_lm.sh --lm-text data/local/lm/text.$lm_name \
-      ${lm_name}${lm_suffix} data/local/lm/3gram-mincount/lm_unpruned.gz data/local/lm/4gram-mincount/lm_unpruned.gz || exit 1;
+    if [ -z "$lambdas" ]; then
+      # LM: LM text, data/local/lm/${lm_name}${lm_suffix}
+      local/train_corpus_lm.sh --lm-text data/local/lm/text.$lm_name \
+        ${lm_name}${lm_suffix} data/local/lm/3gram-mincount/lm_unpruned.gz data/local/lm/4gram-mincount/lm_unpruned.gz || exit 1;
 
-    # lexicon unchanged so skip the prepare_lang.sh
+      # lexicon unchanged so skip the prepare_lang.sh
 
-    # G compilation, check LG composition
-    utils/format_lm.sh data/lang data/local/lm/${lm_name}${lm_suffix}/lm_interp.gz \
-      data/local/dict/lexicon.txt data/lang_${LM}_tg || exit 1;
+      # G compilation, check LG composition
+      utils/format_lm.sh data/lang data/local/lm/${lm_name}${lm_suffix}/lm_interp.gz \
+        data/local/dict/lexicon.txt data/lang_${LM}_tg || exit 1;
+    else
+      # only supported in this LM type
+      local/train_corpus_lm.sh --lm-text data/local/lm/text.$lm_name \
+        --lambdas $lambdas \
+        ${lm_name}${lm_suffix} data/local/lm/3gram-mincount/lm_unpruned.gz data/local/lm/4gram-mincount/lm_unpruned.gz || exit 1;
+
+      for l in $lambdas; do
+        utils/format_lm.sh data/lang data/local/lm/${lm_name}${lm_suffix}/lm_interp_${l}.gz \
+          data/local/dict/lexicon.txt data/lang_${LM}_${l}_tg || exit 1;
+      done
+    fi
     utils/format_lm.sh data/lang data/local/lm/${lm_name}${lm_suffix}/lm_interp_fg.gz \
       data/local/dict/lexicon.txt data/lang_${LM}_fg || exit 1;
   elif [[ $lm_type == "interp-lexicon" ]]; then
@@ -134,57 +148,113 @@ fi
 if [ $stage -le 1 ]; then
   # decode tri1b
   echo "$0: decoding tri1b"
-  graph_dir=exp/tri1b/graph_${lm_name}${lm_suffix}_tg
-  utils/mkgraph.sh data/lang_${LM}_tg exp/tri1b $graph_dir || exit 1;
+  if [ -z "$lambdas" ]; then
+    graph_dir=exp/tri1b/graph_${lm_name}${lm_suffix}_tg
+    utils/mkgraph.sh data/lang_${LM}_tg exp/tri1b $graph_dir || exit 1;
 
-  for c in $test_sets; do
-    decode_dir=exp/tri1b/decode_${c}_${LM}
+    for c in $test_sets; do
+      decode_dir=exp/tri1b/decode_${c}_${LM}
 
-    steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
-      $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
-  done
+      steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+        $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+    done
+  else
+    for l in $lambdas; do
+      graph_dir=exp/tri1b/graph_${lm_name}${lm_suffix}_${l}_tg
+      utils/mkgraph.sh data/lang_${LM}_${l}_tg exp/tri1b $graph_dir || exit 1;
+
+      for c in $test_sets; do
+        decode_dir=exp/tri1b/decode_${c}_${LM}_${l}
+
+        steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+          $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+      done
+    done
+  fi
 fi
 
 if [ $stage -le 2 ]; then
   # decode tri2a
   echo "$0: decoding tri2"
-  graph_dir=exp/tri2a/graph_${lm_name}${lm_suffix}_tg
-  utils/mkgraph.sh data/lang_${LM}_tg exp/tri2a $graph_dir || exit 1;
+  if [ -z "$lambdas" ]; then
+    graph_dir=exp/tri2a/graph_${lm_name}${lm_suffix}_tg
+    utils/mkgraph.sh data/lang_${LM}_tg exp/tri2a $graph_dir || exit 1;
 
-  for c in $test_sets; do
-    decode_dir=exp/tri2a/decode_${c}_${LM}
+    for c in $test_sets; do
+      decode_dir=exp/tri2a/decode_${c}_${LM}
 
-    steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
-      $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
-  done
+      steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+        $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+    done
+  else
+    for l in $lambdas; do
+      graph_dir=exp/tri2a/graph_${lm_name}${lm_suffix}_${l}_tg
+      utils/mkgraph.sh data/lang_${LM}_${l}_tg exp/tri2a $graph_dir || exit 1;
+
+      for c in $test_sets; do
+        decode_dir=exp/tri2a/decode_${c}_${LM}_${l}
+
+        steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+          $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+      done
+    done
+  fi
 fi
 
 if [ $stage -le 3 ]; then
   # decode tri3a
   echo "$0: decoding tri3a"
-  graph_dir=exp/tri3a/graph_${lm_name}${lm_suffix}_tg
-  utils/mkgraph.sh data/lang_${LM}_tg exp/tri3a $graph_dir || exit 1;
+  if [ -z "$lambdas" ]; then
+    graph_dir=exp/tri3a/graph_${lm_name}${lm_suffix}_tg
+    utils/mkgraph.sh data/lang_${LM}_tg exp/tri3a $graph_dir || exit 1;
 
-  for c in $test_sets; do
-    decode_dir=exp/tri3a/decode_${c}_${LM}
+    for c in $test_sets; do
+      decode_dir=exp/tri3a/decode_${c}_${LM}
 
-    steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
-      $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
-  done
+      steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+        $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+    done
+  else
+    for l in $lambdas; do
+      graph_dir=exp/tri3a/graph_${lm_name}${lm_suffix}_${l}_tg
+      utils/mkgraph.sh data/lang_${LM}_${l}_tg exp/tri3a $graph_dir || exit 1;
+
+      for c in $test_sets; do
+        decode_dir=exp/tri3a/decode_${c}_${LM}_${l}
+
+        steps/decode.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+          $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+      done
+    done
+  fi
 fi
 
 if [ $stage -le 4 ]; then
   # decode tri4a
   echo "$0: decoding tri4a"
-  graph_dir=exp/tri4a/graph_${lm_name}${lm_suffix}_tg
-  utils/mkgraph.sh data/lang_${LM}_tg exp/tri4a $graph_dir || exit 1;
+  if [ -z "$lambdas" ]; then
+    graph_dir=exp/tri4a/graph_${lm_name}${lm_suffix}_tg
+    utils/mkgraph.sh data/lang_${LM}_tg exp/tri4a $graph_dir || exit 1;
 
-  for c in $test_sets; do
-    decode_dir=exp/tri4a/decode_${c}_${LM}
+    for c in $test_sets; do
+      decode_dir=exp/tri4a/decode_${c}_${LM}
 
-    steps/decode_fmllr.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
-      $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
-  done
+      steps/decode_fmllr.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+        $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+    done
+  else
+    for l in $lambdas; do
+      graph_dir=exp/tri4a/graph_${lm_name}${lm_suffix}_${l}_tg
+      utils/mkgraph.sh data/lang_${LM}_${l}_tg exp/tri4a $graph_dir || exit 1;
+
+      for c in $test_sets; do
+        decode_dir=exp/tri4a/decode_${c}_${LM}_${l}
+
+        steps/decode_fmllr.sh --cmd "$decode_cmd" --config conf/decode.config --nj 10 \
+          $graph_dir data/$c/test ${decode_dir}_tg || exit 1;
+      done
+    done
+  fi
 fi
 
 # from local/run_cleanup_segmentation.sh
@@ -197,16 +267,31 @@ cleaned_dir=${srcdir}_${cleanup_affix}
 if [ $stage -le 5 ]; then
   # Test with the models trained on cleaned-up data.
   echo "$0: decoding tri4a_cleaned"
-  graph_dir=${cleaned_dir}/graph_${lm_name}${lm_suffix}_tg
-  utils/mkgraph.sh data/lang_${LM}_tg ${cleaned_dir} $graph_dir
+  if [ -z "$lambdas" ]; then
+    graph_dir=${cleaned_dir}/graph_${lm_name}${lm_suffix}_tg
+    utils/mkgraph.sh data/lang_${LM}_tg ${cleaned_dir} $graph_dir
 
-  for c in $test_sets; do
-    decode_dir=${cleaned_dir}/decode_${c}_${LM}
+    for c in $test_sets; do
+      decode_dir=${cleaned_dir}/decode_${c}_${LM}
 
-    steps/decode_fmllr.sh --nj $decode_nj --num-threads $decode_num_threads \
-      --cmd "$decode_cmd" \
-      $graph_dir data/$c/test ${decode_dir}_tg
-  done
+      steps/decode_fmllr.sh --nj $decode_nj --num-threads $decode_num_threads \
+        --cmd "$decode_cmd" \
+        $graph_dir data/$c/test ${decode_dir}_tg
+    done
+  else
+    for l in $lambdas; do
+      graph_dir=${cleaned_dir}/graph_${lm_name}${lm_suffix}_${l}_tg
+      utils/mkgraph.sh data/lang_${LM}_${l}_tg ${cleaned_dir} $graph_dir
+
+      for c in $test_sets; do
+        decode_dir=${cleaned_dir}/decode_${c}_${LM}_${l}
+
+        steps/decode_fmllr.sh --nj $decode_nj --num-threads $decode_num_threads \
+          --cmd "$decode_cmd" \
+          $graph_dir data/$c/test ${decode_dir}_tg
+      done
+    done
+  fi
 fi
 
 # from local/chain/tuning/run_cnn_tdnn_1a.sh
@@ -214,45 +299,75 @@ decode_nj=10
 nnet3_affix=_cleaned
 affix=cnn_1a
 dir=exp/chain${nnet3_affix}/tdnn${affix:+_$affix}_sp
-graph_dir=$dir/graph_${lm_name}${lm_suffix}_tg
 if [ $stage -le 6 ]; then
-  # Note: it's not important to give mkgraph.sh the lang directory with the
-  # matched topology (since it gets the topology file from the model).
-  utils/mkgraph.sh --self-loop-scale 1.0 --remove-oov \
-    data/lang_${LM}_tg $dir $graph_dir
-  # remove <UNK> (word id is 3) from the graph, and convert back to const-FST.
-  oom_int=$(cat data/lang_${LM}_tg/oov.int)
-  fstrmsymbols --apply-to-output=true --remove-arcs=true "echo ${oom_int}|" $graph_dir/HCLG.fst - | \
-    fstconvert --fst_type=const > $graph_dir/temp.fst
-  mv $graph_dir/temp.fst $graph_dir/HCLG.fst
+  if [ -z "$lambdas" ]; then
+    graph_dir=$dir/graph_${lm_name}${lm_suffix}_tg
+    # Note: it's not important to give mkgraph.sh the lang directory with the
+    # matched topology (since it gets the topology file from the model).
+    utils/mkgraph.sh --self-loop-scale 1.0 --remove-oov \
+      data/lang_${LM}_tg $dir $graph_dir
+    # remove <UNK> (word id is 3) from the graph, and convert back to const-FST.
+    oom_int=$(cat data/lang_${LM}_tg/oov.int)
+    fstrmsymbols --apply-to-output=true --remove-arcs=true "echo ${oom_int}|" $graph_dir/HCLG.fst - | \
+      fstconvert --fst_type=const > $graph_dir/temp.fst
+    mv $graph_dir/temp.fst $graph_dir/HCLG.fst
+  else
+    for l in $lambdas; do
+      graph_dir=$dir/graph_${lm_name}${lm_suffix}_${l}_tg
+      # Note: it's not important to give mkgraph.sh the lang directory with the
+      # matched topology (since it gets the topology file from the model).
+      utils/mkgraph.sh --self-loop-scale 1.0 --remove-oov \
+        data/lang_${LM}_${l}_tg $dir $graph_dir
+      # remove <UNK> (word id is 3) from the graph, and convert back to const-FST.
+      oom_int=$(cat data/lang_${LM}_tg/oov.int)
+      fstrmsymbols --apply-to-output=true --remove-arcs=true "echo ${oom_int}|" $graph_dir/HCLG.fst - | \
+        fstconvert --fst_type=const > $graph_dir/temp.fst
+      mv $graph_dir/temp.fst $graph_dir/HCLG.fst
+    done
+  fi
 fi
 
 if [ $stage -le 7 ]; then
   echo "$0: decoding tdnn${affix:+_$affix}_sp"
   rm $dir/.error 2>/dev/null || true
-  for c in $test_sets; do
-    decode_dir=$dir/decode_${c}_${LM}
+  if [ -z "$lambdas" ]; then
+    graph_dir=$dir/graph_${lm_name}${lm_suffix}_tg
+    for c in $test_sets; do
+      decode_dir=$dir/decode_${c}_${LM}
 
-    steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
-      --nj $decode_nj --cmd "$decode_cmd" \
-      --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${c}_hires \
-      $graph_dir data/$c/test_hires ${decode_dir}_tg || exit 1
-
-    # 4gram-LM rescore
-    steps/lmrescore.sh --cmd "$decode_cmd" \
-      --self-loop-scale 1.0 \
-      data/lang_${LM}_tg data/lang_${LM}_fg \
-      data/$c/test_hires ${decode_dir}_tg ${decode_dir}_fg || exit 1
-
-    # for pytorch lattice rescore
-    for n in 1 2 3 4 5 6 7 8 9 10; do
-      decode_dir=$dir/decode_${c}-${n}_${LM}
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
         --nj $decode_nj --cmd "$decode_cmd" \
         --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${c}_hires \
-        $graph_dir data/$c/test_hires-$n ${decode_dir}_tg || exit 1
+        $graph_dir data/$c/test_hires ${decode_dir}_tg || exit 1
+
+      # 4gram-LM rescore
+      steps/lmrescore.sh --cmd "$decode_cmd" \
+        --self-loop-scale 1.0 \
+        data/lang_${LM}_tg data/lang_${LM}_fg \
+        data/$c/test_hires ${decode_dir}_tg ${decode_dir}_fg || exit 1
+
+      # for pytorch lattice rescore
+      for n in 1 2 3 4 5 6 7 8 9 10; do
+      decode_dir=$dir/decode_${c}-${n}_${LM}
+        steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
+          --nj $decode_nj --cmd "$decode_cmd" \
+          --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${c}_hires \
+          $graph_dir data/$c/test_hires-$n ${decode_dir}_tg || exit 1
+      done
     done
-  done
+  else
+    for l in $lambdas; do
+      graph_dir=$dir/graph_${lm_name}${lm_suffix}_${l}_tg
+      for c in $test_sets; do
+        decode_dir=$dir/decode_${c}_${LM}_${l}
+
+        steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
+          --nj $decode_nj --cmd "$decode_cmd" \
+          --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${c}_hires \
+          $graph_dir data/$c/test_hires ${decode_dir}_tg || exit 1
+      done
+    done
+  fi
   [ -f $dir/.error ] && echo "$0: there was a problem while decoding" && exit 1
 fi
 

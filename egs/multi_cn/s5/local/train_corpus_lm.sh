@@ -2,6 +2,7 @@
 
 lm_text=
 lexicon_text=
+lambdas=""
 
 # To be run from one directory above this script.
 . ./path.sh
@@ -16,6 +17,7 @@ if [ $# -gt 3 ]; then
   echo " Options:"
   echo "  --lm-text : specify the LM text path"
   echo "  --lexicon-text: specify the lexicon text path"
+  echo "  --lambdas : lambdas for n-gram LM interpolation"
   exit 1;
 fi
 
@@ -123,7 +125,13 @@ EOF
 fi
 
 train_lm.sh --arpa --lmtype 3gram-mincount $dir || exit 1;
-ngram -lm $dir/3gram-mincount/lm_unpruned.gz -mix-lm $mainlm -lambda 0.9 -write-lm $dir/lm_interp.gz
+if [ -z "$lambdas" ]; then
+  ngram -lm $dir/3gram-mincount/lm_unpruned.gz -mix-lm $mainlm -lambda 0.9 -write-lm $dir/lm_interp.gz
+else
+  for l in $lambdas; do
+    ngram -lm $dir/3gram-mincount/lm_unpruned.gz -mix-lm $mainlm -lambda $l -write-lm $dir/lm_interp_${l}.gz
+  done
+fi
 
 if $has_mainlm_fg; then
   train_lm.sh --arpa --lmtype 4gram-mincount $dir || exit 1;
