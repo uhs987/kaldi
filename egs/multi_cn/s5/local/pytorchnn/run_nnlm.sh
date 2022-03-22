@@ -29,6 +29,7 @@ dropout=0.1
 lm_type=
 test_sets=""
 epsilon=0.5
+weight=0.8
 
 . ./cmd.sh
 . ./path.sh
@@ -43,6 +44,7 @@ if [ $# != 1 ]; then
   echo "  --lm-type [origin|nointerp|interp] : type of LM to use for decode."
   echo "  --model-type [LSTM|Transformer]"
   echo "  --epsilon : epsilon for lattice rescore"
+  echo "  --weight : weight for nbest rescore"
 
   exit 1;
 fi
@@ -210,11 +212,11 @@ if [ $stage -le 2 ]; then
         --hidden_dim $hidden_dim \
         --nlayers $nlayers \
         --nhead $nhead \
-        --weight 0.8 \
+        --weight $weight \
         --oov_symbol "'<UNK>'" \
         data/lang_$LM $nn_model $data_dir/words.txt \
         data/${decode_set}/test_hires ${decode_dir} \
-        ${decode_dir}_${decode_dir_suffix}_nbest
+        ${decode_dir}_${decode_dir_suffix}_nbest_w$weight
   done
   END=$SECONDS
   DURATION=$((END-START))
@@ -234,13 +236,13 @@ if [ $stage -le 3 ]; then
         --hidden_dim $hidden_dim \
         --nlayers $nlayers \
         --nhead $nhead \
-        --weight 0.8 \
+        --weight $weight \
         --beam 5 \
         --epsilon $epsilon \
         --oov_symbol "'<UNK>'" \
         data/lang_$LM $nn_model $data_dir/words.txt \
         data/${decode_set}/test_hires-$n ${decode_dir} \
-        ${decode_dir}_${decode_dir_suffix}_e$epsilon
+        ${decode_dir}_${decode_dir_suffix}_e${epsilon}_w$weight
     done
   done
   #END=$SECONDS
@@ -254,12 +256,12 @@ if [ $stage -le 4 ]; then
   for c in $test_sets; do
     echo "$c:"
     echo "--- CER ---"
-    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}_nbest; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
+    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}_nbest_w*; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
     for n in 1 2 3 4 5 6 7 8 9 10; do
       for x in exp/*/*/decode_${c}-${n}_${LM}_${decode_dir_suffix}*; do [ -d $x ] && grep WER $x/cer_* | utils/best_wer.sh; done 2>/dev/null
     done
     echo "--- WER ---"
-    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}_nbest; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
+    for x in exp/*/*/decode_${c}_${LM}_${decode_dir_suffix}_nbest_w*; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
     for n in 1 2 3 4 5 6 7 8 9 10; do
       for x in exp/*/*/decode_${c}-${n}_${LM}_${decode_dir_suffix}*; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done 2>/dev/null
     done
