@@ -13,8 +13,9 @@ from transformers import BertTokenizer, BertForMaskedLM
 
 
 class Voter:
-	def __init__(self, id, backward):
+	def __init__(self, id, weight_function, backward):
 		self.id = id
+		self.weight_function = weight_function
 		self.backward = backward
 		self.model = None
 		self.tokenizer = None
@@ -27,6 +28,9 @@ class Voter:
 
 		self.weight = 1.0
 
+		self.used_votes = []
+		self.remain_votes = []
+
 		if self.backward != False:
 			self.plain_text = self.plain_text[::-1]
 
@@ -35,8 +39,6 @@ class Voter:
 			for i in range(1, len(transcription)):
 				transcription[i] = transcription[i][::-1]
 
-		self.unmatch_votes = []
-		self.remain_votes = []
 		self.remain_votes = list(transcription[1:])
 
 		self.init = True
@@ -48,9 +50,9 @@ class Voter:
 		# init by other Voter, may be backward text
 		self.plain_text = sentence
 
-		#self.weight = 1.0
+		self.weight = 1.0
 
-		self.unmatch_votes = []
+		self.used_votes = []
 		self.remain_votes = []
 
 		if self.backward != False:
@@ -69,6 +71,10 @@ class Voter:
 		return
 
 	def set_model(self, model, tokenizer):
+		if self.init == False:
+			logging.error('set_model(%d): initialization not complete' % (self.id))
+			return
+
 		self.model = model
 		self.tokenizer = tokenizer
 
@@ -79,27 +85,52 @@ class Voter:
 			logging.error('fork_voter(%d): initialization not complete' % (self.id))
 			return None
 
-		voter = Voter(self.id, self.backward)
+		child = Voter(self.id, self.weight_function, self.backward)
 
-		voter.init_by_string(sentence)
-		voter.set_model(self.model, self.tokenizer)
-		voter.weight = self.weight
+		child.init_by_string(sentence)
+		child.set_model(self.model, self.tokenizer)
+
+		# use weight of complete transcription
+		child.weight = self.weight
 
 		logging.debug('fork_voter(%d), sentence %s' % (self.id, sentence))
-		return voter
+		return child
+
+	def update_weight(self):
+		if self.init == False:
+			logging.error('fork_voter(%d): initialization not complete' % (self.id))
+			return False
+
+		if self.weight_function == 'count':
+			self.weight = 1.0
+			return True
+
+		if self.weight_function == 'ppl' or self.weight_function == 'ppl-count':
+			ppl = self.calculate_ppl()
+			self.weight = 1.0 / ppl
+
+			if self.weight_function == 'ppl-count':
+				self.weight += 1.0
+
+			return True
+
+		logging.error('update_weight(%d): unknown weight_function \'%s\'' % (self.id, self.weight_function))
+		return False
 
 	def calculate_ppl(self):
+		ppl = float('inf')
+
 		if self.init == False:
 			logging.error('calculate_ppl(%d): initialization not complete' % (self.id))
-			return
+			return ppl
 
 		if self.model == None:
 			logging.error('calculate_ppl(%d): no model available' % (self.id))
-			return
+			return ppl
 
 		if self.tokenizer == None:
 			logging.error('calculate_ppl(%d): no tokenizer available' % (self.id))
-			return
+			return ppl
 
 		text = self.plain_text
 		model = self.model
@@ -113,9 +144,7 @@ class Voter:
 			tensor_input = torch.tensor([tokenizer.convert_tokens_to_ids(tokenize_input)])
 			sen_len = len(tokenize_input)
 
-			if sen_len == 0:
-				ppl = float("inf")
-			else:
+			if sen_len != 0:
 				sentence_loss = 0.
 				for i, word in enumerate(tokenize_input):
 					# add mask to i-th character of the sentence
@@ -135,8 +164,7 @@ class Voter:
 				ppl = numpy.exp(-sentence_loss/sen_len)
 
 			logging.info('calculate_ppl(%d): ppl %f for text \'%s\'' % (self.id, ppl, text))
-			self.weight = ppl
-		return
+		return ppl
 
 	def do_vote(self):
 		if self.init == False:
@@ -153,85 +181,159 @@ class Voter:
 		#for i in range(min(1, len(self.remain_votes))):
 		#	future_votes.append(self.remain_votes[i])
 
-		logging.info('do_vote(%d): current %s, unmatch %s, future %s' % (self.id, repr(self.current_vote), self.unmatch_votes, future_votes))
-		return self.unmatch_votes, self.current_vote, future_votes
+		logging.info('do_vote(%d): current %s, used %s, future %s' % (self.id, repr(self.current_vote), self.used_votes, future_votes))
+		return self.used_votes, self.current_vote, future_votes
 
-	def do_align(self, vote):
+	def purge_used_votes(self):
 		if self.init == False:
-			logging.error('do_align(%d): initialization not complete' % (self.id))
+			logging.error('purge_used_votes(%d): initialization not complete' % (self.id))
 			return
 
-		if vote == self.current_vote:
-			logging.info('do_align(%d): my vote wins, clean the unmatch %s' % (self.id, self.unmatch_votes))
-			self.unmatch_votes = []
-			return vote
+		if len(self.used_votes) != 0:
+			logging.info('do_align(%d): clean used_votes %s' % (self.id, self.used_votes))
+			self.used_votes = []
 
-		if len(vote) > len(self.current_vote) and len(self.remain_votes) > 0:
-			if vote == self.current_vote + self.remain_votes[0]:
-				logging.info('do_align(%d): my vote %s should win but too short, pop next vote %s' % (self.id, repr(self.current_vote), repr(self.remain_votes[0])))
-				self.remain_votes.pop(0)
-				self.unmatch_votes = []
-				return vote
+		return
 
-		if len(vote) < len(self.current_vote):
-			if vote == self.current_vote[:len(vote)]:
-				remain = self.current_vote[len(vote):]
+	def do_align(self, winner):
+		if self.init == False:
+			logging.error('do_align(%d): initialization not complete' % (self.id))
+			return ''
+
+		# case 1: already aligned with others, just clean up the used_votes queue
+		if winner == self.current_vote:
+			logging.info('do_align(%d): my vote wins' % (self.id))
+
+			# align success, empty the queue
+			self.purge_used_votes()
+			return winner
+
+		# case 2: my vote is a substring of winner, success to align
+		#  ex. my vote: AB
+		#      winner:  ABCD
+		if len(winner) > len(self.current_vote):
+			if self.current_vote == winner[:len(self.current_vote)]:
+				new_vote = self.current_vote
+				for i in range(len(self.remain_votes)):
+					new_vote += self.remain_votes[i]
+
+					min_len = min(len(winner), len(new_vote))
+
+					if winner[:min_len] != new_vote[:min_len]:
+						# not substring
+						break
+
+					if min_len != len(winner):
+						# add one more vote to check
+						continue
+
+					logging.info('do_align(%d): my vote wins but too short' % (self.id))
+
+					for j in range(i + 1):
+						logging.info('do_align(%d): pop %s from remain_votes %s' % (self.id, repr(self.remain_votes[0]), self.remain_votes))
+						self.remain_votes.pop(0)
+
+					if min_len != len(new_vote):
+						# insert remain of new_vote to remain_votes
+						remain = new_vote[min_len:]
+
+						logging.info('do_align(%d): push %s to remain_votes %s' % (self.id, repr(remain), self.remain_votes))
+						self.remain_votes.insert(0, remain)
+
+					# align success, empty the queue
+					self.purge_used_votes()
+					return winner
+
+		# case 3: winner is a substring of my vote, success to align
+		#  ex. my vote: ABCD
+		#      winner:  AB
+		if len(winner) < len(self.current_vote):
+			if winner == self.current_vote[:len(winner)]:
+				logging.info('do_align(%d): my vote wins but too long' % (self.id))
+
+				# insert remain of current_vote to remain_votes
+				remain = self.current_vote[len(winner):]
+
+				logging.info('do_align(%d): push %s to remain_votes %s' % (self.id, repr(remain), self.remain_votes))
 				self.remain_votes.insert(0, remain)
-				self.unmatch_votes = []
-				logging.info('do_align(%d): my vote %s should win but too long, trim it and update remain %s' % (self.id, repr(self.current_vote), self.remain_votes))
-				return vote
 
-		if vote in self.unmatch_votes:
-			self.unmatch_votes.append(self.current_vote)
+				# align success, empty the queue
+				self.purge_used_votes()
+				return winner
 
-			# remove obsolete votes
-			while self.unmatch_votes.pop(0) != vote:
-				pass
+		# case 4: winner is in my used_votes, success to align
+		new_vote = ''
+		for i in range(len(self.used_votes)):
+			new_vote += self.used_votes[i]
 
-			if len(self.unmatch_votes) != 0:
-				# insert back to remain_votes for next do_vote() call
-				self.unmatch_votes.extend(self.remain_votes)
-				self.remain_votes = self.unmatch_votes
-				self.unmatch_votes = []
+			idx = new_vote.find(winner)
+			if idx < 0:
+				continue
 
-			logging.info('do_align(%d): winner %s in unmatch, update remain %s' % (self.id, repr(vote), self.remain_votes))
-			return vote
+			logging.info('do_align(%d): winner in used_votes' % (self.id))
 
-		# search if the vote is in remain_votes list
-		found = False
-		for i in range(min(2, len(self.remain_votes))):
-			if self.remain_votes[i] == vote:
-				found = True
+			for j in range(i + 1):
+				logging.info('do_align(%d): pop %s from used_votes %s' % (self.id, repr(self.used_votes[0]), self.used_votes))
+				self.used_votes.pop(0)
 
-		if found != False:
+			if idx + len(winner) < len(new_vote):
+				remain = new_vote[idx + len(winner):]
+
+				logging.info('do_align(%d): push %s to used_votes %s' % (self.id, repr(remain), self.used_votes))
+				self.used_votes.insert(0, remain)
+
+			logging.info('do_align(%d): append current_vote %s to used_votes %s' % (self.id, repr(self.current_vote), self.used_votes))
+			self.used_votes.append(self.current_vote)
+
+			# insert back to remain_votes for next do_vote() call
+			logging.info('do_align(%d): push used_votes %s to remain_votes %s' % (self.id, self.used_votes, self.remain_votes))
+			self.used_votes.extend(self.remain_votes)
+			self.remain_votes = self.used_votes
+
+			# align success, empty the queue
+			self.purge_used_votes()
+			return winner
+
+		# case 5: winner is in my remain_votes, success to align
+		for i in range(min(len(self.used_votes) + 1, len(self.remain_votes))):
+			if self.remain_votes[i] != winner:
+				continue
+
+			logging.info('do_align(%d): winner in remain_votes' % (self.id))
+
 			# align myself
-			while self.remain_votes.pop(0) != vote:
-				pass
+			while True:
+				logging.info('do_align(%d): pop %s from remain_votes %s' % (self.id, repr(self.remain_votes[0]), self.remain_votes))
+				if self.remain_votes.pop(0) == winner:
+					break
 
-			self.unmatch_votes = []
-			logging.info('do_align(%d): winner %s in remain, update remain %s' % (self.id, repr(vote), self.remain_votes))
-			return vote
+			# align success, empty the queue
+			self.purge_used_votes()
+			return winner
 
-		self.unmatch_votes.append(self.current_vote)
-		logging.info('do_align(%d): add %s to unmatch %s' % (self.id, repr(self.current_vote), self.unmatch_votes))
+		# case 6: fail to align, update used_votes
+		if self.current_vote != '\n':
+			logging.info('do_align(%d): fail to align, append current_vote %s to used_votes %s' % (self.id, repr(self.current_vote), self.used_votes))
+			self.used_votes.append(self.current_vote)
 
-		#while len(self.unmatch_votes) > 4:
-		#	self.unmatch_votes.pop(0)
+		# seems not helping...
+		#while len(self.used_votes) > 4:
+		#	self.used_votes.pop(0)
 
 		return self.current_vote
 
 class VoterFactory:
 	black_list = ['[SPK]', '[FIL]']
 
-	def __init__(self, vote_dir, hypothesis_file, id, backward):
+	def __init__(self, vote_dir, file_name, id, weight_function, backward):
 		self.init = False
 
 		data_dir = vote_dir + '/data'
 
-		path = data_dir + '/' + hypothesis_file
+		path = data_dir + '/' + file_name
 
 		if os.path.exists(path) == False:
-			logging.error('VoterFactory(%d): hypothesis file does not exist, path %s' % (id, path))
+			logging.error('VoterFactory(%d): transcription file does not exist, path %s' % (id, path))
 			return
 
 		self.transcriptions = []
@@ -246,129 +348,133 @@ class VoterFactory:
 
 				self.transcriptions.append(words)
 
-		self.vote_dir = vote_dir
-		self.hypothesis_file = hypothesis_file
+		scoring_dir = vote_dir + '/scoring_kaldi'
+
+		if os.path.exists(scoring_dir) == False:
+			os.mkdir(scoring_dir)
+
+		path = scoring_dir + '/' + file_name
+
+		self.transcription_file = open(path, 'a', encoding = 'utf-8')
+
+		self.file_name = file_name
 		self.id = id
+		self.weight_function = weight_function
 		self.backward = backward
 		self.model = None
 		self.tokenizer = None
 
 		self.init = True
 
+	def __del__(self):
+		if self.init == False:
+			return
+
+		self.transcription_file.close()
+
 	def get_uid_list(self):
 		if self.init == False:
 			logging.error('get_uid_list(%d): initialization not complete' % (self.id))
-			return
+			return []
 
 		uids = []
 		for transcription in self.transcriptions:
 			uids.append(transcription[0])
 		return uids
 
-	def get_transcription(self, uid):
+	def set_model(self, model, tokenizer):
 		if self.init == False:
-			logging.error('get_transcription(%d): initialization not complete' % (self.id))
+			logging.error('set_model(%d): initialization not complete' % (self.id))
 			return
 
-		for transcription in self.transcriptions:
-			if uid == transcription[0]:
-				return transcription
-
-		logging.error('get_transcription(%d): fail to find hypothesis for uid %s' % (self.id, uid))
-		return []
-
-	def set_model(self, model, tokenizer):
 		self.model = model
 		self.tokenizer = tokenizer
 
 		return
 
+	# create voter object for specific uid
 	def create_voter(self, uid):
 		if self.init == False:
 			logging.error('create_voter(%d): initialization not complete' % (self.id))
-			return
+			return None
 
 		for transcription in self.transcriptions:
-			if uid == transcription[0]:
-				voter = Voter(self.id, self.backward)
+			if uid != transcription[0]:
+				continue
 
-				voter.init_by_list(transcription)
-				voter.set_model(self.model, self.tokenizer)
+			voter = Voter(self.id, self.weight_function, self.backward)
 
-				logging.debug('create_voter(%d), transcription %s' % (self.id, transcription))
-				return voter
+			voter.init_by_list(transcription)
+			voter.set_model(self.model, self.tokenizer)
 
-		logging.error('create_voter(%d): fail to find hypothesis for uid %s' % (self.id, uid))
+			logging.debug('create_voter(%d): voter created with transcription %s' % (self.id, transcription))
+			return voter
+
+		logging.error('create_voter(%d): fail to find transcription for uid %s' % (self.id, uid))
 		return None
 
-	def save_hypothesis(self, uid):
+	# print uid/filename and transcription to a file
+	def print_transcription(self, uid, file, print_uid = True):
 		if self.init == False:
-			logging.error('save_hypothesis(%d): initialization not complete' % (self.id))
-			return
+			logging.error('print_transcription(%d): initialization not complete' % (self.id))
+			return False
 
-		cer_dir = self.vote_dir + '/scoring_kaldi'
+		for transcription in self.transcriptions:
+			if uid != transcription[0]:
+				continue
 
-		if os.path.exists(cer_dir) == False:
-			os.mkdir(cer_dir)
+			if print_uid != False:
+				file.write(transcription[0] + ' ')
+			else:
+				file.write(self.file_name + ' ')
 
-		path = cer_dir + '/' + self.hypothesis_file
+			for i in range(1, len(transcription)):
+				file.write(transcription[i] + ' ')
 
-		with open(path, 'a', encoding = 'utf-8') as fout:
-			for transcription in self.transcriptions:
-				if uid != transcription[0]:
-					continue
+			file.write('\n')
+			return True
 
-				for item in transcription:
-					fout.write(item + ' ')
-
-				fout.write('\n')
-				return True
-
-		logging.error('save_hypothesis(%d): fail to find hypothesis for uid %s' % (self.id, uid))
+		logging.error('print_transcription(%d): fail to find transcription for uid %s' % (self.id, uid))
 		return False
 
-def do_vote(voters, weight):
+def find_max_vote(votes, weights):
+	max_weight = float('-inf')
+	max_vote = ''
+	for vote in votes:
+		weight = weights[vote]
+		if weight > max_weight:
+			max_weight = weight
+			max_vote = vote
+
+	return max_vote
+
+def do_vote(voters):
 	current_votes = []
 	all_weights = {}
 	for voter in voters:
 		all_votes = []
 
-		unmatch_votes, current_vote, future_votes = voter.do_vote()
+		used_votes, current_vote, future_votes = voter.do_vote()
 
-		# unmatch_votes, future_votes are lists while current_vote is string
+		# used_votes, future_votes are lists while current_vote is string
 		current_votes.append(current_vote)
 
-		all_votes += unmatch_votes
+		all_votes += used_votes
 		all_votes += future_votes
 		all_votes.append(current_vote)
 
 		for vote in all_votes:
 			if vote in all_weights:
-				all_weights[vote] += (1.0 / voter.weight)
+				all_weights[vote] += voter.weight
 			else:
-				all_weights[vote] = (1.0 / voter.weight)
+				all_weights[vote] = voter.weight
 
-			if weight == 'ppl-count':
-				# consider ppl only when the word cound is the same
-				all_weights[vote] += 1.0
-
-	if len(current_votes) != len(voters):
-		logging.error('do_vote: someone not voting')
-		return None
-
-	max_weight = float("-inf")
-	max_vote = ''
-	for vote in current_votes:
-		weight = all_weights[vote]
-		if (weight > max_weight):
-			max_weight = weight
-			max_vote = vote
+	max_vote = find_max_vote(current_votes, all_weights)
 
 	logging.info('do_vote: winner %s, weights %s' % (repr(max_vote), all_weights))
 	return max_vote
 
-
-def do_align(voters, weight, winner):
+def do_align(voters, winner):
 	current_votes = []
 	all_weights = {}
 	for voter in voters:
@@ -378,105 +484,19 @@ def do_align(voters, weight, winner):
 		current_votes.append(vote)
 
 		if vote in all_weights:
-			all_weights[vote] += (1.0 / voter.weight)
+			all_weights[vote] += voter.weight
 		else:
-			all_weights[vote] = (1.0 / voter.weight)
+			all_weights[vote] = voter.weight
 
-		if weight == 'ppl-count':
-			# consider ppl only when the word cound is the same
-			all_weights[vote] += 1.0
-
-	if len(current_votes) != len(voters):
-		logging.error('do_align: someone not voting')
-		return False
-
-	max_weight = float("-inf")
-	max_vote = ''
-	for vote in current_votes:
-		weight = all_weights[vote]
-		if (weight > max_weight):
-			max_weight = weight
-			max_vote = vote
+	max_vote = find_max_vote(current_votes, all_weights)
 
 	logging.info('do_align: winner %s, weights %s' % (repr(max_vote), all_weights))
 
 	if max_vote != winner:
-		# it could happen, not sure if it's an error
-		logging.warning("do_align: inconsistent result, winner %s, max_vote %s" % (repr(winner), repr(max_vote)))
+		# it could happen, not sure if it's an error or not
+		logging.warning('do_align: inconsistent result, winner %s, max_vote %s' % (repr(winner), repr(max_vote)))
 
 	return True
-
-def find_best_cer_hypothesis_file(decode_dir):
-	best_cer = decode_dir + '/scoring_kaldi/best_cer'
-
-	if os.path.exists(best_cer) == False:
-		logging.error('best_cer file does not exist, path %s' % (best_cer))
-		return None
-
-	pattern = re.compile(r'(?<=/cer_)(\d+)_(\d+\.\d+)')
-
-	with open(best_cer, 'r', encoding = 'utf-8') as fin:
-		for line in fin.readlines():
-			m = pattern.search(line)
-			num = m.group(1)
-			penalty = m.group(2)
-
-			logging.debug('best_cer: line %s, num %s, penalty %s' % (repr(line), num, penalty))
-
-			path = decode_dir + '/scoring_kaldi/penalty_' + penalty + '/' + num + '.txt'
-			logging.info('best_cer: path %s' % (path))
-			return path
-
-	logging.error('fail to parse best_cer file')
-	return None
-
-def init_data_directory(decode_root, vote_dir, test_set, lm_name, lm_tests, lm_subsets):
-	if len(lm_tests) != len(lm_subsets):
-		logging.error('lengh of lm_tests and lm_subsets do not match')
-		return []
-
-	# create data directory
-	data_dir = vote_dir + '/data'
-	os.mkdir(data_dir)
-
-	# copy transcript file
-	shutil.copyfile('./data/' + test_set + '/test/text', data_dir + '/test_filt.txt')
-
-	# copy/append hypothesis file
-	files = []
-	for i in range(len(lm_tests)):
-		if lm_subsets[i] != 1:
-			for subset in range(1, lm_subsets[i] + 1):
-				decode_dir = decode_root + '/decode_' + test_set + '-' + str(subset) + '_' + lm_name + '_tg_' + lm_tests[i]
-
-				hypothesis_file = find_best_cer_hypothesis_file(decode_dir)
-				if hypothesis_file == None:
-					logging.error('fail to find hypothesis file, decode dir %s' % (decode_dir))
-
-				if os.path.exists(hypothesis_file) == False:
-					logging.error('hypothesis file does not exist, path %s' % (hypothesis_file))
-
-				dst = data_dir + '/' + lm_tests[i] + '.txt'
-				with open(dst, 'a', encoding = 'utf-8') as fout:
-					with open(hypothesis_file, 'r', encoding = 'utf-8') as fin:
-						for line in fin.readlines():
-							fout.write(line)
-		else:
-			decode_dir = decode_root + '/decode_' + test_set + '_' + lm_name + '_tg_' + lm_tests[i]
-
-			hypothesis_file = find_best_cer_hypothesis_file(decode_dir)
-			if hypothesis_file == None:
-				logging.error('fail to find hypothesis file, decode dir %s' % (decode_dir))
-
-			if os.path.exists(hypothesis_file) == False:
-				logging.error('hypothesis file does not exist, path %s' % (hypothesis_file))
-
-			dst = data_dir + '/' + lm_tests[i] + '.txt'
-			shutil.copyfile(hypothesis_file, dst)
-
-		files.append(lm_tests[i] + '.txt')
-
-	return files
 
 def is_subseq(possible_subseq, seq):
 	if len(possible_subseq) > len(seq):
@@ -506,7 +526,7 @@ def get_longest_common_subseq(data):
 					substr = data[0][i:i+j]
 	return substr
 
-def process_sentence(voters, weight, action):
+def process_voters(voters, action):
 	result = []
 
 	if action == 'vote' or action == 'lcs':
@@ -519,49 +539,66 @@ def process_sentence(voters, weight, action):
 			lcs = get_longest_common_subseq(data)
 
 			if len(lcs) != 0:
-				logging.debug('process_sentence: lcs %s found' % (lcs))
+				logging.debug('process_voters: lcs %s found' % (lcs))
 
 				# divide-and-conquer
-				lefters = []
-				righters = []
+				lchildren = []
+				rchildren = []
+
+				lempty = 0
+				rempty = 0
 				for voter in voters:
 					idx = voter.plain_text.find(lcs)
 
-					if idx != 0:
-						child = voter.fork_voter(voter.plain_text[:idx])
-						if child == None:
-							logging.debug('process_sentence: fail to fork voter')
-							return []
+					if idx < 0:
+						# should not happen
+						logging.error('process_voters: fail to find lcs \'%s\' in sentence \'%s\'' % (lcs, voter.plain_text))
+						return []
 
-						lefters.append(child)
+					lsentence = voter.plain_text[:idx]
+					lchild = voter.fork_voter(lsentence)
+					if lchild == None:
+						logging.error('process_voters: fail to fork voter with sentence \'%s\'' % (lsentence))
+						return []
 
-					if idx + len(lcs) < len(voter.plain_text):
-						child = voter.fork_voter(voter.plain_text[idx + len(lcs):])
-						if child == None:
-							logging.debug('process_sentence: fail to fork voter')
-							return []
+					lchildren.append(lchild)
 
-						righters.append(child)
+					rsentence = voter.plain_text[idx + len(lcs):]
+					rchild = voter.fork_voter(rsentence)
+					if rchild == None:
+						logging.error('process_voters: fail to fork voter with sentence \'%s\'' % (rsentence))
+						return []
 
-				if len(lefters) != 0:
-					result += process_sentence(lefters, weight, action)
+					rchildren.append(rchild)
+
+					# lchild has nothing to vote
+					if idx == 0:
+						lempty += 1
+
+					# rchild has nothing to vote
+					if idx + len(lcs) >= len(voter.plain_text):
+						rempty += 1
+
+				if len(voters) != lempty:
+					result += process_voters(lchildren, action)
 
 				result.append(lcs)
 
-				if len(righters) != 0:
-					result += process_sentence(righters, weight, action)
+				if len(voters) != rempty:
+					result += process_voters(rchildren, action)
 
 				return result
 
+		# common part of both vote and lcs
 		while (True):
-			winner = do_vote(voters, weight)
+			winner = do_vote(voters)
 			if winner == None:
-				logging.error("fail to vote")
-				return False
+				logging.error('process_voters: fail to vote')
+				return []
 
-			if do_align(voters, weight, winner) == False:
-				logging.error("fail to align")
-				return False
+			if do_align(voters, winner) == False:
+				logging.error('process_voters: fail to align')
+				return []
 
 			if winner == '\n':
 				break
@@ -573,39 +610,40 @@ def process_sentence(voters, weight, action):
 
 		if forward_text == backward_text:
 			# fast path
-			min_voter = voters[0]
+			max_voter = voters[0]
 		else:
 			for voter in voters:
-				voter.calculate_ppl()
+				voter.update_weight()
 
-			min_weight = float("inf")
+			max_weight = float('-inf')
 			for voter in voters:
-				# weight is ppl, smaller is better
-				if (voter.weight < min_weight):
-					min_weight = voter.weight
-					min_voter = voter
+				if (voter.weight > max_weight):
+					max_weight = voter.weight
+					max_voter = voter
 
-		result = min_voter.remain_votes
+		result = max_voter.remain_votes
+	else:
+		logging.error('process_voters: unknown action \'%s\'' % (action))
 
 	return result
 
-def process_hypothesis_files(vote_dir, files, weight, direction, action):
+def process_hypothesis_files(vote_dir, files, weight_function, direction, action):
 	backward = False
 	factories = []
 	id = 0
 
 	if action == 'vote-combine' or action == 'lcs-combine':
 		if len(files) != 2:
-			logging.error('only process two vote files')
+			logging.error('process_hypothesis_files: only process two vote files')
 			return False
 
 	if direction == 'backward':
 		backward = True
 
 	for file in files:
-		factory = VoterFactory(vote_dir, file, id, backward)
+		factory = VoterFactory(vote_dir, file, id, weight_function, backward)
 		if factory.init == False:
-			logging.error('fail to create factory %d from file %s' % (id, file))
+			logging.error('process_hypothesis_files: fail to create factory %d from file %s' % (id, file))
 			return False
 
 		factories.append(factory)
@@ -614,20 +652,20 @@ def process_hypothesis_files(vote_dir, files, weight, direction, action):
 	uids = factories[0].get_uid_list()
 	logging.info('process_hypothesis_files: %d uids from factory %d' % (len(uids), factories[0].id))
 
-	cer_dir = vote_dir + '/scoring_kaldi'
+	scoring_dir = vote_dir + '/scoring_kaldi'
 
-	if os.path.exists(cer_dir) == False:
-		os.mkdir(cer_dir)
+	if os.path.exists(scoring_dir) == False:
+		os.mkdir(scoring_dir)
 
-	fout = open(cer_dir + '/vote.txt', 'w', encoding = 'utf-8')
-	fout_all = open(cer_dir + '/vote-all.txt', 'w', encoding = 'utf-8')
+	fout = open(scoring_dir + '/vote.txt', 'w', encoding = 'utf-8')
+	fout_all = open(scoring_dir + '/vote-all.txt', 'w', encoding = 'utf-8')
 
-	answer = VoterFactory(vote_dir, 'test_filt.txt', id, backward)
-	if answer.init == False:
-		logging.error('fail to create factory %d from file %s' % (id, 'test_filt.txt'))
+	truth = VoterFactory(vote_dir, 'test_filt.txt', id, weight_function, backward)
+	if truth.init == False:
+		logging.error('process_hypothesis_files: fail to create factory %d from file %s' % (id, 'test_filt.txt'))
 		return False
 
-	if weight == 'ppl' or weight == 'ppl-count':
+	if weight_function == 'ppl' or weight_function == 'ppl-count':
 		model = BertForMaskedLM.from_pretrained('hfl/chinese-bert-wwm-ext')
 		model.eval()
 
@@ -640,44 +678,45 @@ def process_hypothesis_files(vote_dir, files, weight, direction, action):
 	for uid in uids:
 		logging.info('process_hypothesis_files: vote for uid %s' % (uid))
 
-		# save for later cer computation
-		answer.save_hypothesis(uid)
+		# save to test_filt.txt in scoring directory
+		if truth.print_transcription(uid, truth.transcription_file) == False:
+			logging.error('process_hypothesis_files: fail to save transcription of ground truth')
+			return False
 
-		words = answer.get_transcription(uid)
-		for word in words:
-			fout_all.write(word + ' ')
-		fout_all.write('\n')
+		# save to vote-all.txt in scoring directory
+		if truth.print_transcription(uid, fout_all) == False:
+			logging.error('process_hypothesis_files: fail to print transcription of ground truth')
+			return False
 
 		voters = []
 		for factory in factories:
-			# save for later cer computation
-			factory.save_hypothesis(uid)
+			# save to file in scoring directory
+			if factory.print_transcription(uid, factory.transcription_file) == False:
+				logging.error('process_hypothesis_files: fail to save transcription of factory %d' % (factory.id))
+				return False
 
-			fout_all.write(factory.hypothesis_file + ' ')
-			words = factory.get_transcription(uid)
-			for i in range(1, len(words)):
-				fout_all.write(words[i] + ' ')
-			fout_all.write('\n')
+			# save to vote-all.txt in scoring directory
+			if factory.print_transcription(uid, fout_all, print_uid = False) == False:
+				logging.error('process_hypothesis_files: fail to print transcription factory %d' % (factory.id))
+				return False
 
 			voter = factory.create_voter(uid)
 			if voter == None:
-				logging.error('factory %d fail to create voter' % (factory.id))
-				break
+				logging.error('process_hypothesis_files: fail to create voter for factory %d' % (factory.id))
+				return False
+
+			if action != 'vote-combine' and action != 'lcs-combine':
+				voter.update_weight()
 
 			voters.append(voter)
 
+		result = process_voters(voters, action)
+
+		logging.info('process_hypothesis_files: result %s' % (result))
+
+		# save to vote.txt and vote-all.txt in scoring directory
 		fout.write(uid + ' ')
-		if backward != False:
-			fout_all.write('vote(reversed) ')
-		else:
-			fout_all.write('vote ')
-
-		if action != 'vote-combine' and action != 'lcs-combine':
-			if weight == 'ppl' or weight == 'ppl-count':
-				for voter in voters:
-					voter.calculate_ppl()
-
-		result = process_sentence(voters, weight, action)
+		fout_all.write('vote ')
 
 		if backward != False:
 			result.reverse()
@@ -692,15 +731,114 @@ def process_hypothesis_files(vote_dir, files, weight, direction, action):
 		fout.write('\n')
 		fout_all.write('\n\n')
 
-		fout.flush()
-		fout_all.flush()
-
-		logging.info('process_hypothesis_files: result %s' % (result))
+		#fout.flush()
+		#fout_all.flush()
 
 	fout.close()
 	fout_all.close()
 
 	return True
+
+def parse_best_cer_file(decode_dir):
+	best_cer = decode_dir + '/scoring_kaldi/best_cer'
+
+	if os.path.exists(best_cer) == False:
+		logging.error('best_cer file does not exist, path %s' % (best_cer))
+		return None
+
+	pattern = re.compile(r'(?<=/cer_)(\d+)_(\d+\.\d+)')
+
+	with open(best_cer, 'r', encoding = 'utf-8') as fin:
+		for line in fin.readlines():
+			m = pattern.search(line)
+			num = m.group(1)
+			penalty = m.group(2)
+
+			logging.debug('best_cer: line %s, num %s, penalty %s' % (repr(line), num, penalty))
+
+			path = decode_dir + '/scoring_kaldi/penalty_' + penalty + '/' + num + '.txt'
+			logging.info('best_cer: path %s' % (path))
+			return path
+
+	logging.error('fail to parse best_cer file')
+	return None
+
+def init_vote_data_directory(decode_root, vote_dir, test_set, lm_name, lm_tests, lm_subsets):
+	if len(lm_tests) != len(lm_subsets):
+		logging.error('lengh of lm_tests and lm_subsets do not match')
+		return []
+
+	# create data directory
+	data_dir = vote_dir + '/data'
+	os.mkdir(data_dir)
+
+	# copy transcript file of ground truth to data directory
+	shutil.copyfile('./data/' + test_set + '/test/text', data_dir + '/test_filt.txt')
+
+	# copy/append hypothesis file(s) of each LM to data directory
+	hypothesis_files = []
+	for i in range(len(lm_tests)):
+		if lm_subsets[i] != 1:
+			for subset in range(1, lm_subsets[i] + 1):
+				decode_dir = decode_root + '/decode_' + test_set + '-' + str(subset) + '_' + lm_name + '_tg_' + lm_tests[i]
+
+				hypothesis_file = parse_best_cer_file(decode_dir)
+				if hypothesis_file == None:
+					logging.error('fail to find hypothesis file, decode dir %s' % (decode_dir))
+					return []
+
+				if os.path.exists(hypothesis_file) == False:
+					logging.error('hypothesis file does not exist, path %s' % (hypothesis_file))
+					return []
+
+				dst = data_dir + '/' + lm_tests[i] + '.txt'
+				with open(dst, 'a', encoding = 'utf-8') as fout:
+					with open(hypothesis_file, 'r', encoding = 'utf-8') as fin:
+						for line in fin.readlines():
+							fout.write(line)
+		else:
+			decode_dir = decode_root + '/decode_' + test_set + '_' + lm_name + '_tg_' + lm_tests[i]
+
+			hypothesis_file = parse_best_cer_file(decode_dir)
+			if hypothesis_file == None:
+				logging.error('fail to find hypothesis file, decode dir %s' % (decode_dir))
+				return []
+
+			if os.path.exists(hypothesis_file) == False:
+				logging.error('hypothesis file does not exist, path %s' % (hypothesis_file))
+				return []
+
+			dst = data_dir + '/' + lm_tests[i] + '.txt'
+			shutil.copyfile(hypothesis_file, dst)
+
+		hypothesis_files.append(lm_tests[i] + '.txt')
+
+	return hypothesis_files
+
+def init_combine_data_directory(vote_dir_common, vote_dir):
+	hypothesis_files = ['vote-forward.txt', 'vote-backward.txt']
+
+	forward_vote_dir = vote_dir_common + '_forward'
+	if os.path.exists(forward_vote_dir) == False:
+		print('forward vote directory %s does not exist' % (forward_vote_dir))
+		return []
+
+	backward_vote_dir = vote_dir_common + '_backward'
+	if os.path.exists(backward_vote_dir) == False:
+		print('backward vote directory %s does not exist' % (backward_vote_dir))
+		return []
+
+	# create data directory
+	data_dir = vote_dir + '/data'
+	os.mkdir(data_dir)
+
+	shutil.copyfile(forward_vote_dir + '/scoring_kaldi/vote.txt', data_dir + '/vote-forward.txt')
+	shutil.copyfile(backward_vote_dir + '/scoring_kaldi/vote.txt', data_dir + '/vote-backward.txt')
+
+	shutil.copyfile(forward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt.txt')
+	#shutil.copyfile(backward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt-backward.txt')
+
+	return hypothesis_files
 
 def setup_logging(log_dir):
 	log_path = log_dir + '/log.txt'
@@ -739,11 +877,11 @@ def main():
 	parser.add_argument('--lm_subsets', nargs = '+', type = int, help = 'number of subsets of lm')
 
 	# count, ppl, ppl-count
-	parser.add_argument('--weight', type = str, default = 'count', help = 'weight function')
+	parser.add_argument('--weight_function', type = str, default = 'count', help = 'weight function')
 	parser.add_argument('--direction', type = str, default = 'forward', help = 'direction for voting')
 
 	# vote, lcs, vote-combine, lcs-combine
-	parser.add_argument("action", help = "action to take")
+	parser.add_argument('action', help = 'action to take')
 
 	args = parser.parse_args()
 
@@ -752,10 +890,26 @@ def main():
 	lm_name = args.lm_name
 	lm_tests = args.lm_tests
 	lm_subsets = args.lm_subsets
-	weight = args.weight
+	weight_function = args.weight_function
 	direction = args.direction
 
 	action = args.action
+
+	weight_function_options = ['count', 'ppl', 'ppl-count']
+	direction_options = ['forward', 'backward']
+	action_options = ['vote', 'lcs', 'vote-combine', 'lcs-combine']
+
+	if weight_function not in weight_function_options:
+		logging.error('unknown weight_function \'%s\'' % (weight_function))
+		return
+
+	if direction not in direction_options:
+		logging.error('unknown direction \'%s\'' % (direction))
+		return
+
+	if action not in action_options:
+		logging.error('unknown action \'%s\'' % (action))
+		return
 
 	if action == 'vote' or action == 'lcs':
 		# create vote directory if not exist
@@ -763,7 +917,7 @@ def main():
 			vote_dir = decode_root + '/vote_'
 		else:
 			vote_dir = decode_root + '/lcs_'
-		vote_dir += test_set + '_' + lm_name + '_' + weight + '_' + direction
+		vote_dir += test_set + '_' + lm_name + '_' + weight_function + '_' + direction
 
 		if os.path.exists(vote_dir) != False:
 			print('remove old vote directory %s' % (vote_dir))
@@ -774,12 +928,12 @@ def main():
 		setup_logging(vote_dir)
 
 		# copy/merge hypothesis files to data directory
-		files = init_data_directory(decode_root, vote_dir, test_set, lm_name, lm_tests, lm_subsets)
-		if len(files) == 0:
+		hypothesis_files = init_vote_data_directory(decode_root, vote_dir, test_set, lm_name, lm_tests, lm_subsets)
+		if len(hypothesis_files) == 0:
 			logging.error('fail to init data directory')
 			return
 
-		if process_hypothesis_files(vote_dir, files, weight, direction, action) == False:
+		if process_hypothesis_files(vote_dir, hypothesis_files, weight_function, direction, action) == False:
 			logging.error('fail to process hypothesis files')
 			return
 	elif action == 'vote-combine' or action == 'lcs-combine':
@@ -788,41 +942,27 @@ def main():
 		elif action == 'lcs-combine':
 			vote_dir_common = decode_root + '/lcs_'
 
-		vote_dir_common += test_set + '_' + lm_name + '_' + weight
+		vote_dir_common += test_set + '_' + lm_name + '_' + weight_function
 
-		forward_vote_dir = vote_dir_common + '_forward'
-		if os.path.exists(forward_vote_dir) == False:
-			print('forward vote directory %s does not exist' % (forward_vote_dir))
+		vote_dir = vote_dir_common + '_combine'
+		if os.path.exists(vote_dir) != False:
+			logging.info('remove old combine vote directory %s' % (vote_dir))
+			shutil.rmtree(vote_dir)
+
+		os.mkdir(vote_dir)
+
+		setup_logging(vote_dir)
+
+		hypothesis_files = init_combine_data_directory(vote_dir_common, vote_dir)
+		if len(hypothesis_files) == 0:
+			logging.error('fail to init data directory')
 			return
 
-		backward_vote_dir = vote_dir_common + '_backward'
-		if os.path.exists(backward_vote_dir) == False:
-			print('backward vote directory %s does not exist' % (backward_vote_dir))
-			return
-
-		combine_vote_dir = vote_dir_common + '_combine'
-		if os.path.exists(combine_vote_dir) != False:
-			logging.info('remove old combine vote directory %s' % (combine_vote_dir))
-			shutil.rmtree(combine_vote_dir)
-
-		os.mkdir(combine_vote_dir)
-
-		setup_logging(combine_vote_dir)
-
-		# create data directory
-		data_dir = combine_vote_dir + '/data'
-		os.mkdir(data_dir)
-
-		shutil.copyfile(forward_vote_dir + '/scoring_kaldi/vote.txt', data_dir + '/vote-forward.txt')
-		shutil.copyfile(backward_vote_dir + '/scoring_kaldi/vote.txt', data_dir + '/vote-backward.txt')
-
-		shutil.copyfile(forward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt.txt')
-		shutil.copyfile(backward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt-backward.txt')
-
-		files = ['vote-forward.txt', 'vote-backward.txt']
-		if process_hypothesis_files(combine_vote_dir, files, 'ppl', 'forward', action) == False:
+		if process_hypothesis_files(vote_dir, hypothesis_files, 'ppl', 'forward', action) == False:
 			logging.error('fail to process hypothesis files')
 			return
+	else:
+		logging.error('unknown action \'%s\'' % (action))
 
 	return
 
