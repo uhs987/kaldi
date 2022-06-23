@@ -607,19 +607,32 @@ def process_voters(voters, action):
 	elif action == 'vote-combine' or action == 'lcs-combine':
 		forward_text = voters[0].plain_text
 		backward_text = voters[1].plain_text
+		chain_text = voters[2].plain_text
 
 		if forward_text == backward_text:
 			# fast path
 			max_voter = voters[0]
 		else:
-			for voter in voters:
-				voter.update_weight()
+			# compare length
+			forward_dist = abs(len(forward_text) - len(chain_text))
+			backward_dist = abs(len(backward_text) - len(chain_text))
 
-			max_weight = float('-inf')
-			for voter in voters:
-				if (voter.weight > max_weight):
-					max_weight = voter.weight
-					max_voter = voter
+			logging.debug('process_voters: forward %s dist %f' % (forward_text, forward_dist))
+			logging.debug('process_voters: backward %s dist %f' % (backward_text, backward_dist))
+
+			if forward_dist < backward_dist:
+				max_voter = voters[0]
+			elif forward_dist > backward_dist:
+				max_voter = voters[1]
+			else:
+				max_weight = float('-inf')
+
+				for i in range(2):
+					voters[i].update_weight()
+
+					if (voters[i].weight > max_weight):
+						max_weight = voters[i].weight
+						max_voter = voters[i]
 
 		result = max_voter.remain_votes
 	else:
@@ -631,11 +644,6 @@ def process_hypothesis_files(vote_dir, files, weight_function, direction, action
 	backward = False
 	factories = []
 	id = 0
-
-	if action == 'vote-combine' or action == 'lcs-combine':
-		if len(files) != 2:
-			logging.error('process_hypothesis_files: only process two vote files')
-			return False
 
 	if direction == 'backward':
 		backward = True
@@ -815,8 +823,8 @@ def init_vote_data_directory(decode_root, vote_dir, test_set, lm_name, lm_tests,
 
 	return hypothesis_files
 
-def init_combine_data_directory(vote_dir_common, vote_dir):
-	hypothesis_files = ['vote-forward.txt', 'vote-backward.txt']
+def init_combine_data_directory(vote_dir_common, vote_dir, ngram_dir):
+	hypothesis_files = ['vote-forward.txt', 'vote-backward.txt', 'chain.txt']
 
 	forward_vote_dir = vote_dir_common + '_forward'
 	if os.path.exists(forward_vote_dir) == False:
@@ -832,11 +840,25 @@ def init_combine_data_directory(vote_dir_common, vote_dir):
 	data_dir = vote_dir + '/data'
 	os.mkdir(data_dir)
 
+	# copy transcript file of ground truth to data directory
+	shutil.copyfile(forward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt.txt')
+	#shutil.copyfile(backward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt-backward.txt')
+
+	# copy hypothesis file(s) of forward/backward vote result to data directory
 	shutil.copyfile(forward_vote_dir + '/scoring_kaldi/vote.txt', data_dir + '/vote-forward.txt')
 	shutil.copyfile(backward_vote_dir + '/scoring_kaldi/vote.txt', data_dir + '/vote-backward.txt')
 
-	shutil.copyfile(forward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt.txt')
-	#shutil.copyfile(backward_vote_dir + '/scoring_kaldi/test_filt.txt', data_dir + '/test_filt-backward.txt')
+	# copy chain result
+	hypothesis_file = parse_best_cer_file(ngram_dir)
+	if hypothesis_file == None:
+		logging.error('fail to find hypothesis file, decode dir %s' % (ngram_dir))
+		return []
+
+	if os.path.exists(hypothesis_file) == False:
+		logging.error('hypothesis file does not exist, path %s' % (hypothesis_file))
+		return []
+
+	shutil.copyfile(hypothesis_file, data_dir + '/chain.txt')
 
 	return hypothesis_files
 
@@ -946,15 +968,17 @@ def main():
 
 		vote_dir = vote_dir_common + '_combine'
 		if os.path.exists(vote_dir) != False:
-			logging.info('remove old combine vote directory %s' % (vote_dir))
+			print('remove old combine vote directory %s' % (vote_dir))
 			shutil.rmtree(vote_dir)
 
 		os.mkdir(vote_dir)
 
 		setup_logging(vote_dir)
 
-		hypothesis_files = init_combine_data_directory(vote_dir_common, vote_dir)
-		if len(hypothesis_files) == 0:
+		ngram_dir = decode_root + '/decode_' + test_set + '_' + lm_name + '_tg'
+
+		hypothesis_files = init_combine_data_directory(vote_dir_common, vote_dir, ngram_dir)
+		if len(hypothesis_files) != 3:
 			logging.error('fail to init data directory')
 			return
 
